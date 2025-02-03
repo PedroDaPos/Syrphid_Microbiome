@@ -1,0 +1,67 @@
+# Syrphid 16S data analysis
+# Pedro Rodrigues
+# April 2023
+
+# All files are located at /scratch/pd88715/Syrphid16S
+
+# I am using NextFlow nf-core/ampliseq . It is a new system I have not used before, but I would like to give it a try
+
+# The first step is to create a samplesheet.tsv file listing all paired reads files as well as sample names. This is more easily done in Excel.
+
+# Use the following code to list paired reads in two columns (note, here I am ignoring files in the folder named "archive")
+find ./ -path './archive' -prune -o -name "*_R1_001.fastq.gz" -exec sh -c 'echo "$0 $(echo "$0" | sed "s/_R1_001.fastq.gz$/_R2_001.fastq.gz/")"' {} \; | paste -d " " - /dev/null
+
+# On Excel adjust sample name and file path. The results should be similar to this
+
+sampleID	forwardReads	reverseReads
+AO_APFL_1	./AO_F21_APFL_1_S42_R1_001.fastq.gz	./AO_F21_APFL_1_S42_R2_001.fastq.gz
+AO_APFL_2	./AO_F21_APFL_2_S54_R1_001.fastq.gz	./AO_F21_APFL_2_S54_R2_001.fastq.gz
+AO_APFL_4	./AO_F21_APFL_4_S66_R1_001.fastq.gz	./AO_F21_APFL_4_S66_R2_001.fastq.gz
+AO_APFL_5	./AO_F21_APFL_5_S78_R1_001.fastq.gz	./AO_F21_APFL_5_S78_R2_001.fastq.gz
+AO_AT2AL_1	./AO_F21_AT2AL_1_S90_R1_001.fastq.gz	./AO_F21_AT2AL_1_S90_R2_001.fastq.gz
+AO_AT2AL_2	./AO_F21_AT2AL_2_S7_R1_001.fastq.gz	./AO_F21_AT2AL_2_S7_R2_001.fastq.gz
+AO_ATAL_1	./AO_F21_ATAL_1_S19_R1_001.fastq.gz	./AO_F21_ATAL_1_S19_R2_001.fastq.gz
+AO_ATAL_2	./AO_F21_ATAL_2_S31_R1_001.fastq.gz	./AO_F21_ATAL_2_S31_R2_001.fastq.gz
+AO_ATGA_1	./AO_F21_ATGA_1_S8_R1_001.fastq.gz	./AO_F21_ATGA_1_S8_R2_001.fastq.gz
+AO_ATGA_2	./AO_F21_ATGA_2_S20_R1_001.fastq.gz	./AO_F21_ATGA_2_S20_R2_001.fastq.gz
+AO_ATGA_4	./AO_F21_ATGA_4_S32_R1_001.fastq.gz	./AO_F21_ATGA_4_S32_R2_001.fastq.gz
+AO_ATGA_6	./AO_F21_ATGA_6_S44_R1_001.fastq.gz	./AO_F21_ATGA_6_S44_R2_001.fastq.gz
+AO_AUAL_4	./AO_F21_AUAL_4_S56_R1_001.fastq.gz	./AO_F21_AUAL_4_S56_R2_001.fastq.gz
+AO_AUAL_8	./AO_F21_AUAL_8_S68_R1_001.fastq.gz	./AO_F21_AUAL_8_S68_R2_001.fastq.gz
+
+
+# Metadata file will look like this
+
+ID	condition
+AO_APFL_1	species_1
+AO_APFL_2	species_1
+AO_APFL_4	species_1
+AO_APFL_5	species_1
+AO_AT2AL_1	species_1
+AO_AT2AL_2	species_1
+AO_ATAL_1	species_1
+AO_ATAL_2	species_1
+AO_ATGA_1	species_1
+AO_ATGA_2	species_1
+
+# On the UGA hpc, run the following command to start using the NextFlow nf-core/ampliseq system
+
+module load Nextflow
+
+# Building the code for this analysis; the goal is to mimic most closely what I usually do in DADA2 and R
+
+module load Nextflow
+
+nextflow run nf-core/ampliseq \
+    -r 2.7.0 \
+    -profile singularity \
+    --input './samplesheet2122.tsv' \
+    --FW_primer GTGYCAGCMGCCGCGGTAA \
+    --RV_primer GGACTACNVGGGTWTCTAAT \
+    --metadata "./2122metada.tsv" \
+    --outdir "./nextflow_dir" \
+    --retain_untrimmed \
+    --qiime_ref_taxonomy silva=138 \
+    --picrust \
+    --qiime_adonis_formula "Species", "Year*Species","State*Species", "S_W_N*Species" \
+    --ignore_empty_input_files
