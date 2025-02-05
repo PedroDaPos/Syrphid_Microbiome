@@ -30,6 +30,7 @@ theme_set(theme_bw())
 ```
 
 Load Data (quality-trimmed and denoised using DADA2 and the nf-core/ampliseq pipeline)
+
 ```{r phyloseq-load-improved-data, eval=FALSE}
 p_data.chimera_free <- readRDS("DADA2_table.rds")
 ```
@@ -52,7 +53,9 @@ saveRDS(p_data.chimera_free, "RDS/DADA2_table.rds")
 ## Move analysis over to Phyloseq
 
 ### Load RDS files (ASV table file and taxonomy file)
+
 #### Also load metadata file, where sample names are row names
+
 ```{r phyloseq-load-data, eval=FALSE}
 p_data.chimera_free <- readRDS("RDS/DADA2_table.rds")
 tax <- readRDS("RDS/tax_hoverflies.rds")
@@ -72,6 +75,7 @@ write_tsv(metadata, "../input/metadataJan2025.tsv")
 ```
 
 Make Phyloseq object
+
 ```{r phyloseq-make-object-1, eval=FALSE}
 p_data <- phyloseq(otu_table(p_data.chimera_free, taxa_are_rows = FALSE),
                    sample_data(metadata_merge_2),
@@ -79,6 +83,7 @@ p_data <- phyloseq(otu_table(p_data.chimera_free, taxa_are_rows = FALSE),
 ```
 
 Store DNA sequences in a different slot and simplify ASV names
+
 ```{r phyloseq-format-data, eval=FALSE}
 dna <- Biostrings::DNAStringSet(taxa_names(p_data))
 names(dna) <- taxa_names(p_data)
@@ -88,6 +93,7 @@ p_data
 ```
 
 Investigate taxa in the dataset - how many samples are not bacteria?
+
 ```{r summarize-no-bacteria, eval=FALSE}
 p_data
 p_data %>%
@@ -133,3 +139,132 @@ p_data_taxlean %>%
       Biostrings::writeXStringSet("./Syrphid_asv_02_2025.fasta", append=FALSE,
                                   compress=FALSE, compression_level=NA, format="fasta")
 ```
+
+Blast was run using the script "blast_ASV_syrphid.sh", and taxonomixal ranks were added to the output file ("0203205_nt_blast_syrphid.tsv") using the script "Get_lineage_blast.sh". The resulting spreadsheet was saved as "syr16S_annotated_ASV_nt_blast.csv". Next, I will identify "NA" sequences that were resolved by blast, and manually inspect their identification and eliminate any spurious results (e.g. annotations containing mistakes, non-taxonomical attributions, etc).
+
+```{r load taxonomical data}
+old_tax_table <- read.csv("../results/blast/Syrphid_asv_02_2025.csv")
+blast_tax_table <- read.csv("../results/blast/syr16S_annotated_ASV_nt_blast.csv")
+NA_old_tax_table <- old_tax_table %>% filter(is.na(Genus)) %>% 
+  rename("X" = "qseqid") #select only ASV with NA at the Genus level; rename ASV id column to match the corresponding blast column name
+NoNA_blast_tax_table <- blast_tax_table %>% filter(!is.na(genus)) # select blast results that resolved identification at the Genus level
+resolved_by_blast <- left_join(NA_old_tax_table, NoNA_blast_tax_table, by = "qseqid") %>% filter(!is.na(genus)) # combine both subset data sets, using the old tax table as the reference for rows to include, and qseqid as the column in common to allow the merge of these tables; next, exclude "genus" in blast results that were not resolved
+```
+
+Blast helped resolve the identification of 164 ASV, including bacteria and contaminants (e.g. plants, fungus). Next, I will transfer all taxonomical levels for resolved genera from blast results to the "old_tax_table".
+
+```{r update taxonomy}
+# Prepare resolved_by_blast to be added to the final taxonomy file
+# Select only relevant columns
+resolved_by_blast_slim <- resolved_by_blast %>% select(c("qseqid", "superkingdom", "phylum", "class", "order", "family", "genus", "species"))
+# Rename columns to match phyloseq tax table
+colnames(resolved_by_blast_slim) <- c("X", "Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+# Rename values in "Species" to eliminate characters that Phyloseq might not like
+resolved_by_blast_slim <- resolved_by_blast_slim %>% mutate(Species = paste ("sp"))
+# Use anti-join to eliminate from old_tax_table entries that overlap with the new results
+old_tax_table_slice <- anti_join(old_tax_table, resolved_by_blast_slim, by = "X")
+# Now join rows from both datasets into the final dataset
+updated_tax <- bind_rows(resolved_by_blast_slim, old_tax_table_slice)
+```
+
+For now this should be sufficient. Downstream, I will further improve taxonomy by replacing NA at the genus level with the next best taxonomical id followed by "sp" (e.g. "Orbacaeae sp.", or "Bacteria sp.", etc).
+
+Add new taxonomy back to the phyloseq object
+
+```{r add-updated-taxonomy}
+#rename rows with ASV identifier
+row.names(updated_tax) <- updated_tax$X
+# remove first column
+updated_tax <- updated_tax[-1]
+new_tax <- tax_table(as.matrix(updated_tax))
+tax_table(p_data_taxlean) <- new_tax
+```
+
+Further cleaning - now let's eliminate resolved IDs that revealed more contaminants in the dataset
+
+```{r what-taxa-is-there-2, eval=FALSE}
+updated_tax %>% select(Kingdom) %>% unique()
+updated_tax %>% select(Phylum) %>% unique()
+updated_tax %>% select(Class) %>% unique()
+updated_tax %>% select(Order) %>% unique()
+```
+
+```{r further-cleaning}
+p_data_taxlean <- p_data_taxlean %>% subset_taxa(Kingdom != "Eukaryota" | is.na(Kingdom)) %>% subset_taxa(Phylum != "Cyanobacteria/Chloroplast" | is.na(Phylum)) %>% subset_taxa(Class != "Cyanobacteria" | is.na(Class))
+```
+
+Let's check if there is still contaminants left
+
+```{r double-check-contaminants, eval=FALSE}
+p_data_taxlean %>% psmelt() %>% select(Genus) %>% unique()
+p_data_taxlean %>% psmelt() %>% select(Class) %>% unique()
+p_data_taxlean %>% psmelt() %>% select(Phylum) %>% unique()
+p_data_taxlean %>% psmelt() %>% select(c("OTU","Phylum")) %>% filter(is.na(Phylum)) %>% select(OTU) %>% unique()
+```
+
+No obvious contaminant, although taxa with "NA" at the phylum level are suspicious (n=47). However, ASV2 was at first "NA" at the phylum level and after Blast identified as Bacteria, so we can not rule out (yet) that these ASVs are not contaminants. In downstream analysis some of those may be excluded due to low abundance in the dataset.
+
+Before proceeding to stats and plots, save the new taxonomy table and a summary of the data
+
+```{r save-updated_taxonomy, eval=FALSE}
+saveRDS(p_data_taxlean,"../results/RDS/p_data_taxlean.rds")
+```
+
+```{r save-ASV-metadata-seq-table, eval=FALSE}
+write.table(p_data_taxlean %>% psmelt() %>% arrange(OTU) %>% 
+              dplyr::rename(ASV = OTU) %>% select(ASV, Kingdom, Phylum, Class, Order, Family, Genus, Sample, Abundance) %>% spread (Sample, Abundance), 
+    file = "../results/summary_syrphid16S_February2025.tsv", sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+
+----------------
+#Stats and Plots
+----------------
+
+```{r load-more-packages}
+library(microbiome)
+library(ggpubr)
+library(knitr)
+library(ggtext)
+library(scales)
+library(ggside)
+library(RColorBrewer)
+#devtools::install_github("vmikk/metagMisc")
+library(metagMisc)
+```
+
+Before I start testing hypotheses and making figures, I will filter very rare bacteria species, to eliminate (other) potential contaminants from the dataset. Then I will rarefy data with and without Wolbachia, for downstream analyses (Wolbachia was detected at high abundance in all datasets, which may mask differences; so long we keep in the dataset samples with the highest sequence count, we might still be able to detect obvious differences with the sequences left after eliminating Wolbachia).
+
+1. Prevalence filtering: I will eliminate any ASV with that in average less than "10" across at least 5% of the samples
+
+```{r eliminate low prevalence ASV}
+filtered_and_clean <- phyloseq_filter_prevalence(p_data_taxlean, prev.trh = 0.025, abund.trh = 10, threshold_condition = "OR")
+```
+
+
+2. For rarefying data, I will use phyloseq_mult_rare_avg, that will subsample samples 1000 times and average the number of times ASVs are observed in each sample according to the threshold I will establish below
+
+```{r rarefy-data, eval=FALSE}
+otu_table(p_data_taxlean) <- otu_table(t(otu_table(p_data_taxlean)), taxa_are_rows=TRUE)
+sample_size_quantile <- as.data.frame(quantile(sample_sums(p_data_taxlean), probs = c(0, 0.10, 0.15, 0.225, 0.25, 0.5, 0.75, 1)))
+sample_size_threshold <- sample_size_quantile["25%", ] # 14,021 reads
+p_data_taxlean_rr <- phyloseq_mult_raref_avg(p_data_taxlean, SampSize = sample_size_threshold, iter=1000, parallel = TRUE,verbose = TRUE)
+p_data_taxlean_rr <- transform_sample_counts(p_data_taxlean_rr, function(x){ x * sample_size_threshold})
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -14,4 +14,4 @@
 module load BLAST+/2.14.1-gompi-2023a
 module load ncbiblastdb/20241102
 mkdir blast_results
-blastn -query Syrphid_asv_02_2025.fasta -db nt -evalue 1e-30 -num_threads 8 -max_target_seqs 1 -outfmt '6 qseqid stitle evalue bitscore pident qcovs qcovhsp' -out blast_results/0203205_nt_blast_syrhpid.tsv
+blastn -query Syrphid_asv_02_2025.fasta -db nt -evalue 1e-30 -num_threads 8 -max_target_seqs 1 -outfmt '6 qseqid sseqid stitle evalue bitscore pident qcovs qcovhsp' -out blast_results/0203205_nt_blast_syrhpid.tsv

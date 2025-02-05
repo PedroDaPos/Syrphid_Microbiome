@@ -2,9 +2,9 @@
 
 library(taxize)
 library(tidyverse)
-setwd("/scratch/pd88715/pacbio_whiteflygc/fastq/Syrphids_only/results/Blast/")
+setwd("/scratch/pd88715/Syrphids16S/results_Syr16S/dada2/blast_results")
 
-blastn_taxa <- read.table("./ASV_ITS_nt_blast.tsv", sep="\t", header = FALSE)
+blastn_taxa <- read.table("./0203205_nt_blast_syrhpid.tsv", sep="\t", header = FALSE)
 output_columns_blast <- c("qseqid", "sseqid", "stitle", "evalue", "bitscore", "pident", "qcovs", "qcovhsp")
 colnames(blastn_taxa) <- output_columns_blast
 
@@ -33,4 +33,4 @@ ncbi_lineage_df <- dplyr::select(ncbi_lineage_df, sseqid, query, superkingdom, p
 ncbi_lineage_df <- left_join(blastn_taxa_top, ncbi_lineage_df, by = "sseqid")
 
 # save annotated blast data frame
-write.csv(ncbi_lineage_df, "./taxrank_annotated_ITS2_ASV_nt_blast.csv")
+write.csv(ncbi_lineage_df, "./syr16S_annotated_ASV_nt_blast.csv")
