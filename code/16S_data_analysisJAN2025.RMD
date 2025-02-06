@@ -233,14 +233,79 @@ library(RColorBrewer)
 library(metagMisc)
 ```
 
-Before I start testing hypotheses and making figures, I will filter very rare bacteria species, to eliminate (other) potential contaminants from the dataset. Then I will rarefy data with and without Wolbachia, for downstream analyses (Wolbachia was detected at high abundance in all datasets, which may mask differences; so long we keep in the dataset samples with the highest sequence count, we might still be able to detect obvious differences with the sequences left after eliminating Wolbachia).
+First, check the abundance of Wolbachia in the samples.
+
+```{r Wolbachia prevalence across samples}
+# Join the pseq_barplot and metadata_merge
+Wolbachia_barplot <- tax_glom(p_data_taxlean, "Genus") %>% psmelt() %>% 
+  mutate(BacSpec = ifelse(!Genus == "Wolbachia", "Other", "Wolbachia"))
+
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(Wolbachia_barplot, aes(x = Sample, y = Abundance, fill = BacSpec)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  facet_wrap(~sample_Species, scale="free") + 
+  labs(title = "Hoverfly microbiome is dominated by Wolbachia",
+       x = "Samples",
+       y = "Relative Frequency") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank()) +
+  labs(fill = "Bacteria Species") +
+  scale_fill_manual(values = c("Wolbachia" = "#009E73", "Other" = "darkgrey"))
+ggsave("../results/Figures/WolbachiaPrevalence.pdf", width=15, height=10)
+```
+
+How many samples are left after removing Wolbachia?
+
+```{r leftover-after-removing-Wolbachia}
+leftover_barplot <- tax_glom(p_data_taxlean, "Genus") %>% subset_taxa(Genus != "Wolbachia") %>% psmelt()
+leftover_barplot %>% filter(sample_Species == "Allograpta obliqua") %>% group_by(Sample) %>% summarise(sum_abund = sum(Abundance)) %>% arrange(sum_abund)
+leftover_barplot %>% filter(sample_Species == "Eupeodes americanus") %>% group_by(Sample) %>% summarise(sum_abund = sum(Abundance)) %>% arrange(sum_abund)
+```
+
+How many samples would be lost if we keep only leftover samples with a size greater than 1000 sequences?
+```{r samples-lost-after-AbundanceFilter}
+leftover_barplot %>% filter(sample_Species == "Allograpta obliqua") %>% group_by(Sample) %>% summarise(sum_abund = sum(Abundance)) %>%
+  filter(sum_abund > 1000) %>% nrow()
+leftover_barplot %>% filter(sample_Species == "Eupeodes americanus") %>% group_by(Sample) %>% summarise(sum_abund = sum(Abundance)) %>%
+  filter(sum_abund > 1000) %>% nrow()
+```
+
+With this arbitrary filter (1000 sequences), there is still a decent number of samples left in the dataset for each host species. The main concern then is whether these samples are still representative of the population, i.e. is the microbiota of samples with lower counts of Wolbachia different from samples with higher counts of Wolbachia, or are the titers of Wolbachia independent of the gut microbiota composition? With this current dataset we are not able to make this distinction, but we can infer that if we do find differences supporting our hypotheses regarding the relationship between host diet and their migratory behavior, then we can at the very least infer that these differences are true, for this subgroup of samples.
+
+What is sample size distribution for each species after removing Wolbachia and filtering abundance > 1000 ?
+```{r plot-sample-size-noWolbachia}  
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(leftover_barplot %>% group_by(Sample, sample_Species) %>% summarize(sum_abund = sum(Abundance), .groups = "drop") %>%
+         filter(sum_abund > 1000) %>% arrange(sample_Species, desc(sum_abund)) %>%
+         unite("sp_sample", sample_Species, Sample, sep = "_", remove=FALSE) %>%
+         data.frame() %>%
+         mutate(sp_sample = factor(sp_sample, levels = sp_sample)) %>% group_by(sample_Species), aes(x = sp_sample, y = sum_abund)) +
+  geom_col() +
+  geom_hline(yintercept = 1000, color = "white") +
+  facet_wrap(~sample_Species, scale="free") + 
+  labs(title = "Sample size distribution after removal of Wolbachia",
+       x = "Samples",
+       y = "Sum of read counts") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank())
+ggsave("../results/Figures/NoWol_samplesizedistrib.pdf", width=15, height=10)
+```
+
+Most samples have over 1000 sequences, with close to half having over 4-5K sequences each. I think this is a good sign, supporting the decision of eliminating Wolbachia from the dataset, eliminating possible noise/masking of biologically-relevant differences in microbiome composition, and allowing for additional exploration of the Syrphid microbiome.
+
+> A note on further filtering data: I decided not to filter data based on prevalence, after noticing that the number of OTU would dramatically decrease, even when using "soft" filtering criteria (e.g. "exclude ASV with total abundance smaller than 10 and prevalence in less than 2.5% of the samples"). The reason the loss was so dramatic is possibly because many ASV are the same bacteria (Genus), and ASV does tend to overestimate richness due to variation in 16S nucleotide composition within species that DADA2 classifies as different ASV, so generating many ASVs for the same Genus of bacteria, with a small number of reads for most ASV variants of the same Genus, and a larger count of reads for the Genus ASV variant that is most common. Therefore, perhaps for hypothesis testing or plotting, it may make more sense to agglomerate data to Genus and filter, but not filtering may be needed for more general characterization of the data, such as alpha diversity metrics, or for rarefying data.
 
 1. Prevalence filtering: I will eliminate any ASV with that in average less than "10" across at least 5% of the samples
 
 ```{r eliminate low prevalence ASV}
-filtered_and_clean <- phyloseq_filter_prevalence(p_data_taxlean, prev.trh = 0.025, abund.trh = 10, threshold_condition = "OR")
+filtered_and_clean <- phyloseq_filter_prevalence(p_data_taxlean, prev.trh = 0.025, abund.trh = 10, threshold_condition = "OR") #p_data_tax_lean has 807 taxa (ASV)
 ```
 
+After this filter, 459 taxa were kept in the dataset. This is a loss of approximately 
 
 2. For rarefying data, I will use phyloseq_mult_rare_avg, that will subsample samples 1000 times and average the number of times ASVs are observed in each sample according to the threshold I will establish below
 
