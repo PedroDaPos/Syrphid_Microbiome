@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE, cache=TRUE)
 ```
 
 ```{r init, warning=FALSE, message=FALSE}
-setwd("/Users/ento-user/Documents/Syrphids_microbiome/Syrphids_microbiome")
+setwd("/Users/ento-user/Documents/Syrphids_microbiome/Syrphid_microbiome")
 set.seed("12345678")
 library(dada2);packageVersion("dada2") # 1.30.0
 library(Biostrings); packageVersion("Biostrings") # 2.70.3
@@ -297,27 +297,288 @@ ggsave("../results/Figures/NoWol_samplesizedistrib.pdf", width=15, height=10)
 
 Most samples have over 1000 sequences, with close to half having over 4-5K sequences each. I think this is a good sign, supporting the decision of eliminating Wolbachia from the dataset, eliminating possible noise/masking of biologically-relevant differences in microbiome composition, and allowing for additional exploration of the Syrphid microbiome.
 
-> A note on further filtering data: I decided not to filter data based on prevalence, after noticing that the number of OTU would dramatically decrease, even when using "soft" filtering criteria (e.g. "exclude ASV with total abundance smaller than 10 and prevalence in less than 2.5% of the samples"). The reason the loss was so dramatic is possibly because many ASV are the same bacteria (Genus), and ASV does tend to overestimate richness due to variation in 16S nucleotide composition within species that DADA2 classifies as different ASV, so generating many ASVs for the same Genus of bacteria, with a small number of reads for most ASV variants of the same Genus, and a larger count of reads for the Genus ASV variant that is most common. Therefore, perhaps for hypothesis testing or plotting, it may make more sense to agglomerate data to Genus and filter, but not filtering may be needed for more general characterization of the data, such as alpha diversity metrics, or for rarefying data.
+> A note on further filtering data: I decided not to filter data based on prevalence, after noticing that the number of OTU would dramatically decrease, even when using "soft" filtering criteria (e.g. "exclude ASV with total abundance smaller than 10 and prevalence in less than 2.5% of the samples"). The reason the loss was so dramatic is possibly because many ASV are the same bacteria (Genus), and ASV does tend to overestimate richness due to variation in 16S nucleotide composition within species that DADA2 classifies as different ASV, so generating many ASVs for the same Genus of bacteria, with a small number of reads for most ASV variants of the same Genus, and a larger count of reads for the Genus ASV variant that is most common. Therefore, perhaps for hypothesis testing or plotting, it may make more sense to agglomerate data to Genus and filter, but for other types of analysis perhaps variation in the 16S, even within a Genus of bacteria, might be biologically relevant. For instance, this kind of variation may be informative if variation is associated to location where samples were collected.
 
-1. Prevalence filtering: I will eliminate any ASV with that in average less than "10" across at least 5% of the samples
+<!-- 1. Prevalence filtering: I will eliminate any ASV with that in average less than "10" across at least 5% of the samples -->
 
-```{r eliminate low prevalence ASV}
-filtered_and_clean <- phyloseq_filter_prevalence(p_data_taxlean, prev.trh = 0.025, abund.trh = 10, threshold_condition = "OR") #p_data_tax_lean has 807 taxa (ASV)
+<!-- ```{r eliminate low prevalence ASV} -->
+<!-- filtered_and_clean <- phyloseq_filter_prevalence(p_data_taxlean, prev.trh = 0.025, abund.trh = 10, threshold_condition = "OR") #p_data_tax_lean has 807 taxa (ASV) -->
+<!-- ``` -->
+
+<!-- After this filter, 459 taxa were kept in the dataset. This is a loss of approximately  -->
+
+So, based on these results, I will split data into two datasets: with and without Wolbachia.
+
+```{r split-data-byWolb}
+Wolb <- p_data_taxlean
+NoWolb <- p_data_taxlean %>% subset_taxa(Genus != "Wolbachia") 
+NoWolb <- NoWolb %>% subset_samples(sample_sums(NoWolb) > 1000)
 ```
 
-After this filter, 459 taxa were kept in the dataset. This is a loss of approximately 
+For rarefying data, I will use phyloseq_mult_rare_avg, that will subsample samples 1000 times and average the number of times ASVs are observed in each sample according to the threshold I will establish below
 
-2. For rarefying data, I will use phyloseq_mult_rare_avg, that will subsample samples 1000 times and average the number of times ASVs are observed in each sample according to the threshold I will establish below
+```{r thresholds-rarefy-data, eval=FALSE}
+#Wolb
+otu_table(Wolb) <- otu_table(t(otu_table(p_data_taxlean)), taxa_are_rows=TRUE)
+sample_size_quantile <- as.data.frame(quantile(sample_sums(Wolb), probs = c(0, 0.10, 0.15, 0.225, 0.25, 0.5, 0.75, 1)))
+sample_size_quantile["10%", ] # 3,656 reads
+sample_size_quantile["25%", ] # 14,021 reads
+sample_size_quantile["50%", ] # 25,268.5 reads
+sample_size_quantile["75%", ] # 32,769 reads
+#NoWolb
+NoWolb_1 <- NoWolb
+otu_table(NoWolb_1) <- otu_table(t(otu_table(NoWolb)), taxa_are_rows=TRUE)
+sample_size_quantile <- as.data.frame(quantile(sample_sums(NoWolb_1), probs = c(0, 0.10, 0.15, 0.225, 0.25, 0.5, 0.75, 1)))
+sample_size_quantile["10%", ] # 1,395.8 reads
+sample_size_quantile["25%", ] # 2,238 reads
+sample_size_quantile["50%", ] # 5,492 reads
+sample_size_quantile["75%", ] # 9,589.5 reads
+```
 
-```{r rarefy-data, eval=FALSE}
-otu_table(p_data_taxlean) <- otu_table(t(otu_table(p_data_taxlean)), taxa_are_rows=TRUE)
-sample_size_quantile <- as.data.frame(quantile(sample_sums(p_data_taxlean), probs = c(0, 0.10, 0.15, 0.225, 0.25, 0.5, 0.75, 1)))
-sample_size_threshold <- sample_size_quantile["25%", ] # 14,021 reads
-p_data_taxlean_rr <- phyloseq_mult_raref_avg(p_data_taxlean, SampSize = sample_size_threshold, iter=1000, parallel = TRUE,verbose = TRUE)
-p_data_taxlean_rr <- transform_sample_counts(p_data_taxlean_rr, function(x){ x * sample_size_threshold})
+Samples that would be lost with some of these thresholds
+
+```{r samples-lost}
+Wolb_loss <- as.data.frame(sample_sums(Wolb))
+names(Wolb_loss) <- "Sample_size"
+NoWolb_loss <- as.data.frame(sample_sums(NoWolb))
+names(NoWolb_loss) <- "Sample_size"
+data.frame(Wolbachia = c("yes", "yes", "yes", "no", "no", "no"), Quantile_cutoff = c("no cutoff", "10%", "25%", "no cutoff", "10%", "25%"), Samples_left = c(nrow(Wolb_loss), nrow(filter(Wolb_loss, Sample_size > 3656)), nrow(filter(Wolb_loss, Sample_size > 14021)), nrow(NoWolb_loss), nrow(filter(NoWolb_loss, Sample_size > 2238)), nrow(filter(NoWolb_loss, Sample_size > 5492))))
+```
+
+With Wolbachia, sample size is still robust even when using a quantile cutoff of 25% (that is, keeping samples representing the top 75% of sample size range). But the "no Wolbachia" dataset is much smaller and even a small cutoff (10% quantile) can take away important samples that perhaps would be informative for our questions related to sample geography, migration and diet. Therefore, we should try to keep as many samples as possible in the "no Wolbachia" dataset. Perhaps using the smallest samples as the threshold for rarefaction is best.
+
+```{r rarefy-samples}
+Wolb_rr <- phyloseq_mult_raref_avg(p_data_taxlean, SampSize = 14021, iter=1000, parallel = TRUE,verbose = TRUE)
+NoWolb_rr <- phyloseq_mult_raref_avg(NoWolb, SampSize = sample_size_quantile["0%", ], iter=1000, parallel = TRUE,verbose = TRUE)
+Wolb_rr <- transform_sample_counts(Wolb_rr, function(x){ x * 14021})
+NoWolb_rr <- transform_sample_counts(NoWolb_rr, function(x){x * sample_size_quantile["0%", ]})
+```
+
+One interesting (but expected) result from rarefying data: keeping Wolbachia, and more samples, but rarefying at a higher threshold resulted in fewer taxa (381) than removing Wolbachia, but using a smaller rarefaction cutoff for samples size (1021 sequences, 401 taxa kept).
+
+The phyloseq_mult_raref_avg function removes the "Refseq" component of the phyloseq object. I will put it back to each object (Wolb and NoWolb), so that it can be used in downstream analysis
+
+```{r add-back-sequences}
+Wotu_table <- t(as(otu_table(Wolb_rr), "matrix"))
+asv_ids <- colnames(Wotu_table)
+refseq_phyloseq <- refseq(p_data_taxlean)
+refseq_phyloseq_W <- refseq_phyloseq[names(refseq_phyloseq) %in% asv_ids]
+Wolb_rr_up <- merge_phyloseq(Wolb_rr, refseq_phyloseq_W)
+NoWotu_table <- t(as(otu_table(NoWolb_rr), "matrix"))
+asv_ids <- colnames(NoWotu_table)
+refseq_phyloseq_NoW <- refseq_phyloseq[names(refseq_phyloseq) %in% asv_ids]
+NoWolb_rr_up <- merge_phyloseq(NoWolb_rr, refseq_phyloseq_NoW)
 ```
 
 
+Next, let's test two hypothesis:
+(1) That microbial communities are different between _Allograpta_ and _Eupeodes_ _americanus_
+(2) That microbial communities are different between North and South populations for *non-migratory* hoverflies ( _Allograpta_ ), but more similar between North and South populations for *migratory* hoverflies ( _Eupeodes_ ) 
+
+To test these hypotheses, I will use a Permanova test. One assumption of Permanova is that there is homogeneity of dispersion between groups.
+For hypothesis "1", host species is the grouping variable, and for the second hypothesis, for each species, region of sampling (north vs south) is the grouping variable.
+
+
+```{r betadisper}
+library("vegan")
+# Extract OTU table from phyloseq object, calculate Bray-Curtis distances, and calculate beta dispersion
+# 1. For Wolb_rr_up; first, exclude Eupeodes pomus from the dataset (only one species)
+Wolb_rr_up_filt <- Wolb_rr_up %>% subset_samples(Species != "Eupeodes pomus")
+otu_table <- t(as(otu_table(Wolb_rr_up_filt), "matrix"))
+Wolb_bray_dist <- vegdist(otu_table, method = "bray")
+metadata_Wolb_rr_up_filt <- data.frame(sample_data(Wolb_rr_up_filt))
+disper_SpID <- betadisper(Wolb_bray_dist, metadata_Wolb_rr_up_filt$Species)
+
+# Test if dispersion between groups is significant
+anova(disper_SpID) # P-value VERY significant (P<0.00000001); data is overdispersed
+
+# 2. For NoWolb_rr_up
+NoWolb_rr_up_filt <- NoWolb_rr_up %>% subset_samples(Species != "Eupeodes pomus")
+otu_table <- t(as(otu_table(NoWolb_rr_up_filt), "matrix"))
+NoWolb_bray_dist <- vegdist(otu_table, method = "bray")
+metadata_NoWolb_rr_up_filt <- data.frame(sample_data(NoWolb_rr_up_filt))
+disper_SpID <- betadisper(NoWolb_bray_dist, metadata_NoWolb_rr_up_filt$Species)
+
+# Test if dispersion between groups is significant
+anova(disper_SpID) # p > 0.05, data is not overdispersed, so we can use bray distances for the data with Wolbachia removed
+```
+
+Homogeneity of dispersion is not met for the Wolbachia-present dataset. I will try to use Unifrac distances, but first I need to build a phylogenetic tree. I will also calculate Unifrac distances for the Wolbachia-absent dataset, in case needed for downstream analyses.
+
+1. Build tree and calculate unifrac distances
+```{r UniFrac-distances}
+library(phangorn)
+library(DECIPHER)
+library(GUniFrac)
+# Wolb_rr_up
+refseq_phyloseq_W_filt <- refseq(Wolb_rr_up_filt)
+alignment <- AlignSeqs(refseq_phyloseq_W_filt, anchor=NA)
+phangAlign <- phyDat(as(alignment, "matrix"), type="DNA")
+dm <- dist.ml(phangAlign)
+treeNJ <- NJ(dm)
+mod.test <- modelTest(phangAlign) 
+mod.test$Model[mod.test$AIC==min(mod.test$AIC)] #this gives GTR+G(4)+I as the best model, i.e. the model with the smallest AIC (or BIC) result
+fit = pml(treeNJ, data=phangAlign)
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+        rearrangement = "stochastic", control = pml.control(trace = 0)) #this may take 15-20 min
+rooted_fitGTR_tree <- midpoint(fitGTR$tree)
+#detach("package:phangorn", unload=TRUE)
+Wolb_rr_up_phytree <- merge_phyloseq(Wolb_rr_up_filt, rooted_fitGTR_tree)
+
+
+# NoWolb_rr_up
+refseq_phyloseq_NoW_filt <- refseq(NoWolb_rr_up_filt)
+alignment <- AlignSeqs(refseq_phyloseq_NoW_filt, anchor=NA)
+phangAlign <- phyDat(as(alignment, "matrix"), type="DNA")
+dm <- dist.ml(phangAlign)
+treeNJ <- NJ(dm)
+mod.test <- modelTest(phangAlign) 
+mod.test$Model[mod.test$AIC==min(mod.test$AIC)] #this gives GTR+G(4)+I as the best model, i.e. the model with the smallest AIC (or BIC) result
+fit = pml(treeNJ, data=phangAlign)
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+        rearrangement = "stochastic", control = pml.control(trace = 0)) #this may take 15-20 min
+rooted_fitGTR_tree <- midpoint(fitGTR$tree)
+#detach("package:phangorn", unload=TRUE)
+NoWolb_rr_up_phytree <- merge_phyloseq(NoWolb_rr_up_filt, rooted_fitGTR_tree)
+```
+
+2. Next, I calculate if data is still overdispersed using betadisper
+```{r betadisper-UniFrac}
+#unifrac_dist <- UniFrac(Wolb_rr_up_phytree, weighted = TRUE)
+#Wolb
+metadata <- data.frame(sample_data(Wolb_rr_up_phytree))
+unifracs = GUniFrac::GUniFrac(t(as(otu_table(Wolb_rr_up_phytree), "matrix")), phy_tree(Wolb_rr_up_phytree), alpha = c(0, 0.5, 1))$unifracs
+Wolb_unifrac_distUW <- as.dist(unifracs[, , "d_UW"])
+Wolb_unifrac_dist_d_1 <- as.dist(unifracs[, , "d_1"])
+Wolb_unifrac_dist_d_05 <- as.dist(unifracs[, , "d_0.5"])
+Wolb_unifrac_betadisperUW <- betadisper(Wolb_unifrac_distUW, metadata$Species) 
+anova(Wolb_unifrac_betadisperUW)
+Wolb_unifrac_betadisper_d_1 <- betadisper(Wolb_unifrac_dist_d_1, metadata$Species) 
+anova(Wolb_unifrac_betadisper_d_1)
+Wolb_unifrac_betadisper_d_05 <- betadisper(Wolb_unifrac_dist_d_05, metadata$Species) 
+anova(Wolb_unifrac_betadisper_d_05)
+
+metadata <- data.frame(sample_data(NoWolb_rr_up_phytree))
+unifracs = GUniFrac::GUniFrac(t(as(otu_table(NoWolb_rr_up_phytree), "matrix")), phy_tree(NoWolb_rr_up_phytree), alpha = c(0, 0.5, 1))$unifracs
+NoWolb_unifrac_distUW <- as.dist(unifracs[, , "d_UW"])
+NoWolb_unifrac_dist_d_1 <- as.dist(unifracs[, , "d_1"])
+NoWolb_unifrac_dist_d_05 <- as.dist(unifracs[, , "d_0.5"])
+NoWolb_unifrac_betadisperUW <- betadisper(NoWolb_unifrac_distUW, metadata$Species) 
+anova(NoWolb_unifrac_betadisperUW)
+NoWolb_unifrac_betadisper_d_1 <- betadisper(NoWolb_unifrac_dist_d_1, metadata$Species) 
+anova(NoWolb_unifrac_betadisper_d_1)
+NoWolb_unifrac_betadisper_d_05 <- betadisper(NoWolb_unifrac_dist_d_05, metadata$Species) 
+anova(NoWolb_unifrac_betadisper_d_05)
+
+```
+
+Unweighted Unifrac distances worked best for both datasets, with or without Wolbachia. Because unweighted distances resolved homogeneity of variance across datasets, and because Bray-Curtis resolved only marginally (p=0.06) homogeneity of variance for groups in the "No Wolbachia" samples, I will adopt unifrac (UW) distances in the tests below.
+
+Test the hypothesis that microbiome is different between host species
+
+```{r permanova-sp}
+# With Wolbachia
+HostSpecies <- sample_data(Wolb_rr_up_phytree)$Species
+Year_all <- sample_data(Wolb_rr_up_phytree)$Year
+Season_all <- sample_data(Wolb_rr_up_phytree)$Season
+metadata <- data.frame(sample_data(Wolb_rr_up_phytree))
+adonis2(formula = Wolb_unifrac_distUW ~ Species + Season_all, data = metadata, strata = Year_all, permutations = 999)
+
+# Without Wolbachia
+HostSpecies <- sample_data(NoWolb_rr_up_phytree)$Species
+Year_all <- sample_data(NoWolb_rr_up_phytree)$Year
+Season_all <- sample_data(NoWolb_rr_up_phytree)$Season
+metadata <- data.frame(sample_data(NoWolb_rr_up_phytree))
+adonis2(formula = NoWolb_unifrac_distUW ~ Species + Season_all, data = metadata, strata = Year_all, permutations = 999)
+```
+
+The microbiome of _Allograpta_ and _Eupeodes_ is different regardless of whether _Wolbachia_ is present or absent! It is worth noting that _Wolbachia_ itself is represented by different ASVs in each host species.
+
+
+Now, to test the second hypothesis. To recap, we hypothesized:
+
+"(2) That microbial communities are different between North and South populations for *non-migratory* hoverflies ( _Allograpta_ ), but more similar between North and South populations for *migratory* hoverflies ( _Eupeodes_ )"
+
+First, we need to split datasets into species-specific data.
+
+```{r split-data-in-species}
+#Wolb
+Allograpta_wolb <- Wolb_rr_up_phytree %>% subset_samples(Species == "Allograpta obliqua")
+Eupeodes_wolb <- Wolb_rr_up_phytree %>% subset_samples(Species == "Eupeodes americanus")
+
+#NoWolb
+Allograpta_Nowolb <- NoWolb_rr_up_phytree %>% subset_samples(Species == "Allograpta obliqua")
+Eupeodes_Nowolb <- NoWolb_rr_up_phytree %>% subset_samples(Species == "Eupeodes americanus")
+```
+
+Let's check if Bray-Curtis distances can be used to test geography, while respecting the assumption of homogeneity of variance for Permanova tests
+
+```{r species-data-betadisper}
+#Wolb
+## Allograpta
+Allograpta_wolbNS <- Allograpta_wolb %>% subset_samples(S_W_N != "West") # <- exclude a few "West" samples, so we can compare only North and South samples
+otu_table <- t(as(otu_table(Allograpta_wolbNS), "matrix"))
+AWolb_bray_dist <- vegdist(otu_table, method = "bray")
+metadata_AWolb <- data.frame(sample_data(Allograpta_wolbNS))
+disper_NS_AWolb <- betadisper(AWolb_bray_dist, metadata_AWolb$S_W_N)
+anova(disper_NS_AWolb) # p-value < 0.0016; data is over dispersed
+## Eupeodes
+otu_table <- t(as(otu_table(Eupeodes_wolb), "matrix"))
+EaWolb_bray_dist <- vegdist(otu_table, method = "bray")
+metadata_EaWolb <- data.frame(sample_data(Eupeodes_wolb))
+disper_NS_EaWolb <- betadisper(EaWolb_bray_dist, metadata_EaWolb$S_W_N)
+anova(disper_NS_EaWolb) # p-value = 0.8578; data is not over dispersed
+
+#NoWolb
+## Allograpta
+Allograpta_NowolbNS <- Allograpta_Nowolb %>% subset_samples(S_W_N != "West") # <- exclude a few "West" samples, so we can compare only North and South samples
+otu_table <- t(as(otu_table(Allograpta_NowolbNS), "matrix"))
+ANoWolb_bray_dist <- vegdist(otu_table, method = "bray")
+metadata_ANoWolb <- data.frame(sample_data(Allograpta_NowolbNS))
+disper_NS_ANoWolb <- betadisper(ANoWolb_bray_dist, metadata_ANoWolb$S_W_N)
+anova(disper_NS_ANoWolb) # p-value = 0.1301; data is not over dispersed
+## Eupeodes
+otu_table <- t(as(otu_table(Eupeodes_Nowolb), "matrix"))
+EaNoWolb_bray_dist <- vegdist(otu_table, method = "bray")
+metadata_EaNoWolb <- data.frame(sample_data(Eupeodes_Nowolb))
+disper_NS_EaNoWolb <- betadisper(EaNoWolb_bray_dist, metadata_EaNoWolb$S_W_N)
+anova(disper_NS_EaNoWolb) # p-value = 0.4914; data is not over dispersed
+```
+
+
+
+
+
+
+
+
+
+```{r combine-bac-by-family, eval=FALSE}
+pseq_alpha <-aggregate_taxa(Wolb_rr, level = "Genus")
+tab <-microbiome::diversity(pseq_alpha, index = "Shannon")
+```
+
+Extract and prepare dataframe for plotting alpha diversity as a violin plot
+Note: when plotting, the OnDemand rendering of Rstudio does not show some markdown text formatting, such as italicized or bold words
+```{r plot-violin-plots}
+pseq_alpha_meta <- microbiome::meta(pseq_alpha)
+pseq_alpha_meta$Shannon <- tab$shannon
+
+pseq_alpha_plot <- ggviolin(pseq_alpha_meta %>% mutate(Species = factor(Species, levels = c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus"))), x="Species", y="Shannon", add="boxplot", fill="Species")+scale_fill_manual(values = c("Allograpta obliqua" = "#FB9A99", "Eupeodes americanus" = "#E31A1C", "Eupeodes pomus" = "#FDBF6F"))
+
+p1 <- pseq_alpha_plot+ labs(
+  x = "Species",
+  y = "Shannon index",
+  title = "Microbiome Alpha Diversity in Hoverflies"
+) +
+  theme(
+    axis.title.x = element_markdown(),
+    axis.title.y = element_markdown()
+  )
+ggpar(p1, ylim = c(0, 3))
+```
 
 
 
