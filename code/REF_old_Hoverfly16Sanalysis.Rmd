@@ -1,0 +1,1080 @@
+---
+title: "The Hoverfly microbiome: 16S data analysis"
+author: "Pedro Rodrigues"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_depth: 3
+    fig_caption: yes
+
+fontsize: 14pt
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE)
+```
+
+```{r init, warning=FALSE, message=FALSE}
+
+setwd("/Volumes/Extreme Pro/Syrphids16S/results_Syr16S/dada2")
+set.seed("12345678")
+
+library(dada2);packageVersion("dada2")
+library(Biostrings); packageVersion("Biostrings")
+library(rmarkdown)
+library(tidyverse)
+#BiocManager::install("BiocStyle")
+```
+
+```{r more preparation, warning=FALSE, message=FALSE}
+path.out <- "Figures/"
+path.rds <- "RDS/"
+theme_set(theme_bw())
+```
+
+Load Data
+
+```{r phyloseq-load-improved-data, eval=FALSE}
+p_data.chimera_free <- readRDS("DADA2_table.rds")
+#p_data.cleanSampleData <- readRDS("RDS/p_data.cleanSampleData.rds")
+#p_data.cleanOTUTaxaTable <- readRDS("RDS/p_data.cleanOTUTaxaTable.rds")
+#p_data.cleanOTURefSeq <- readRDS("RDS/p_data.cleanOTURefSeq.rds")
+```
+
+```{r assign taxonomy, eval=FALSE}
+# Assign taxonomy
+tax <- assignTaxonomy(p_data.chimera_free, "./rdp_train_set_18.fa.gz", minBoot = 80, tryRC = TRUE, multithread=TRUE) # Slowest part
+head(unname(tax))
+tax <- addSpecies(tax, "./rdp_species_assignment_18.fa.gz")
+```
+
+```{r save-progrss-taxonomy, eval=FALSE}
+# Write to disk
+#saveRDS(st.all_chimera_free, "RDS/PBB_all_runs_2.rds")
+saveRDS(tax, "RDS/tax_hoverflies.rds")
+saveRDS(p_data.chimera_free, "RDS/DADA2_table.rds")
+```
+
+> NOTE: taxonomy will be improved later, using BLAST (nt database), but only after the ASV table is further cleaned up in Phyloseq
+
+## Move analysis over to Phyloseq
+
+### Load all runs RDS files (ASV table file and taxonomy file)
+#### Also load metadata file, where sample names are row names
+```{r phyloseq-load-data, eval=FALSE}
+library(tidyverse)
+p_data.chimera_free <- readRDS("DADA2_table.rds")
+tax <- readRDS("RDS/tax_hoverflies.rds")
+metadata <- read.table("../input/2122metada.tsv", sep = "\t", header = TRUE)
+samples.out <- data.frame(old_ID = rownames(p_data.chimera_free))
+samples_out <- samples.out %>% separate_wider_delim(old_ID,delim ="_1.f", names = c("ID", "suffix"), cols_remove = FALSE)
+metadata_merge <- left_join(metadata, samples_out, by = "ID")
+row.names(metadata_merge) <- metadata_merge[,13]
+```
+
+```{r backup-data, eval=FALSE}
+write_tsv(metadata, "../input/2122metada.tsv")
+```
+
+Make Phyloseq object
+```{r phyloseq-make-object-1, eval=FALSE}
+p_data <- phyloseq(otu_table(p_data.chimera_free, taxa_are_rows = FALSE), 
+                   sample_data(metadata_merge),
+                   tax_table(tax))
+```
+
+Store DNA sequences in a different slot and simplify ASV names
+```{r phyloseq-format-data, eval=FALSE}
+dna <- Biostrings::DNAStringSet(taxa_names(p_data))
+names(dna) <- taxa_names(p_data)
+p_data <- merge_phyloseq(p_data, dna)
+taxa_names(p_data) <- paste0("ASV", seq(ntaxa(p_data)))
+p_data
+```
+
+Investigate taxa in the dataset - how many samples are not bacteria?
+
+```{r summarize-no-bacteria, eval=FALSE}
+#tax_table(p_data.clean) %>% as("matrix") %>% as_tibble 
+p_data
+p_data %>%
+  subset_taxa(Kingdom!="Bacteria") %>%
+  tax_table() %>% as.data.frame() %>% group_by(Order) %>% tally()
+```
+
+Not a lot of other taxa - 67 ASV identified as plants and two Archaea, from a total of 1056 ASVs
+
+How many identified and unidentified ASV at the Phylum and Class levels?
+
+```{r summarize-no-bacteria-phylum-class, eval=FALSE}
+#tax_table(p_data.clean) %>% as("matrix") %>% as_tibble 
+p_data
+p_data %>%
+  tax_table() %>% as.data.frame() %>% group_by(Phylum, Class) %>% tally()
+```
+
+A few NA. These can be improved later using Blast and or other tools for taxonomical assignment. For now, I will focus on learning more about plants in these samples, and then removing them and other taxa that are not relevant for this study.
+
+First, I will make data more easy to work with, by calculating relative abundance, and transforming the phyloseq object into a summary table.
+
+```{r relative-abundance-dada2-processed-data-and-taxonomy, eval=FALSE}
+#tax_table(p_data.clean) %>% as("matrix") %>% as_tibble 
+pdata_df0 <- p_data %>% transform_sample_counts(function(x) x*100/sum(x)) %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU)  %>% spread(Sample, Abundance)
+                                                                                                                                          
+pdata_df <- p_data %>% tax_glom(taxrank = "Order") %>% transform_sample_counts(function(x) x*100/sum(x)) %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>% 
+  select(ASV, Kingdom, Phylum, Class, Order, Sample, Abundance) %>% spread(Sample, Abundance)
+```
+
+I checked for plant DNA earlier, but are there chloroplasts? How much in each sample?
+```{r count-taxa-nobacteria, eval=FALSE}
+pdata_df %>% filter(Order == "Chloroplast") %>% select(!c(ASV, Kingdom, Phylum, Class)) %>% gather(Order, Abundance) %>% arrange(desc(Abundance)) %>% paged_table()
+#pdata_df %>% select(!c(ASV, Kingdom, Phylum, Class)) %>% pivot_longer(-1) %>% pivot_wider(names_from = "Order", values_from="value") %>% rename(sample = name)
+# How much chloroplast and plant DNA in the sample with most reads removed (from previous analysis with automated taxonomic filter set in DADA2)?
+pdata_df %>% select(c(Class, AO_S22_TIGA_1_1.filt.fastq.gz)) %>% filter(AO_S22_TIGA_1_1.filt.fastq.gz != 0) %>% paged_table()
+# How about the sample with most chloroplast according to this rank?
+pdata_df %>% select(c(Class, AO_F21_ATAL_2_1.filt.fastq.gz)) %>% filter(AO_F21_ATAL_2_1.filt.fastq.gz != 0) %>% paged_table()
+```
+
+At least 80 of 186 samples have chloroplasts representing 10% or more of all reads. Among them, 44 samples have close to 50% of its reads classified as chloroplasts. That is 44*100/186 = 23.65% of all samples. 
+
+How much archaea? (Spoiler: less than 1% in the sample with most Archaea)
+```{r count-taxa-nobacteria-archaea, eval=FALSE}
+pdata_df %>% filter(Kingdom == "Archaea") %>% select(!c(ASV, Phylum, Class, Order)) %>% gather(Kingdom, Abundance) %>% arrange(desc(Abundance)) %>% paged_table()
+```
+
+There is no mitochondria (the error message is a result of no match for the query term)
+```{r mitochondria-count, eval=FALSE}
+subset_taxa(p_data, Family == "Mitochondria")
+```
+
+Let's remove chloroplasts, plant DNA and other taxa that may not be relevant here.
+
+```{r remove-chloroplast--plants-archaea, eval=FALSE}
+p_data_taxlean <- p_data %>% subset_taxa(Kingdom != "Archaea") %>% subset_taxa((Order != "Chloroplast") | is.na(Order)) %>% subset_taxa((Kingdom != "Eukaryota") | is.na(Kingdom)) %>% subset_samples(sample_sums(p_data) > 0)
+```
+
+Save taxonomy table and ASV fasta and blast unknown sequences to increase accuracy of classification
+
+```{r save-taxonomy-table, eval=FALSE}
+p_data_taxlean %>%
+  tax_table() %>%
+  write.csv("./Syrphid_asv_10_2023.csv")
+```
+
+```{r save-sequences-fasta, eval=FALSE}
+p_data_taxlean %>%
+      refseq() %>%
+      Biostrings::writeXStringSet("./Syrphid_asv_10_2023.fasta", append=FALSE,
+                                  compress=FALSE, compression_level=NA, format="fasta")
+```
+
+>Taxonomy was improved using ncbi's nucleotide database. Blast was performed and results were processed and added to the taxonomy csv file saved above. All code for wrangling blast results and creating new taxonomy file is in "Get_lineage_blast.R"
+
+```{r add-enhanced-taxonomy, eval=FALSE}
+new_tax_table <- read.csv("~/mydir/Syrphids16S/results_Syr16S/dada2/blast/dada2_ncbi_combined_taxonomy_Syr16S.csv", row.names = 2)
+new_tax_table <- new_tax_table[-1]
+new_tax <- tax_table(as.matrix(new_tax_table))
+tax_table(p_data_taxlean) <- new_tax
+```
+
+```{r backup-data-2, eval=FALSE}
+write_csv(new_tax_table, "~/mydir/Syrphids16S/results_Syr16S/dada2/blast/dada2_ncbi_combined_taxonomy_Syr16S.csv")
+```
+
+> The new taxonomy identified additional taxa that are not Bacteria, or that are organelle DNA. We will need to filter data one more time
+
+```{r what-taxa-is-there-2, eval=FALSE}
+new_tax_table %>% select(Kingdom) %>% unique()
+new_tax_table %>% select(Class) %>% unique()
+new_tax_table %>% select(Order) %>% unique()
+```
+
+To remove from Class: Insecta, Entomophthoromycetes, Dothideomycetes, Eurotiomycetes, Magnoliopsida, Eumycetozoa, Heterotrichea, Leotiomycetes
+
+Remove unwanted taxa
+```{r remove-chloroplast--plants-archaea-2, eval=FALSE}
+p_data_taxlean <- p_data_taxlean %>% subset_taxa(Class != "Insecta" | is.na(Class)) %>% subset_taxa(Class != "Entomophthoromycetes" | is.na(Class))%>% subset_taxa(Class != "Dothideomycetes" | is.na(Class)) %>% subset_taxa(Class != "Eurotiomycetes" | is.na(Class)) %>% subset_taxa(Class != "Magnoliopsida" | is.na(Class)) %>% subset_taxa(Class != "Eumycetozoa" | is.na(Class)) %>% subset_taxa(Class != "Heterotrichea" | is.na(Class)) %>% subset_taxa(Class != "Leotiomycetes" | is.na(Class)) %>% subset_samples(sample_sums(p_data) > 0)
+
+#p_data_taxlean <- subset_samples(sample_sums(p_data_taxlean) > 0)
+```
+
+Check if any obvious contaminant was left, and remove
+```{r double-check-contaminants, eval=FALSE}
+p_data_taxlean %>% psmelt() %>% select(Genus) %>% unique()
+```
+
+
+# unwanted taxa found: Peronospora
+
+```{r more-cleaning, eval=FALSE}
+p_data_taxlean <- p_data_taxlean %>% subset_taxa(Order != "Peronosporales" | is.na(Order))
+```
+
+```{r backup-data-3, eval=FALSE}
+saveRDS(p_data_taxlean,"RDS/taxlean.rds")
+```
+
+```{r save-ASV-metadata-seq-table, eval=FALSE}
+write.table(p_data_taxlean %>% psmelt() %>% arrange(OTU) 
+            %>% rename(ASV = OTU) %>% select(ASV, Kingdom, Phylum, Class, Order, Family, Genus, Sample, Abundance) %>% spread (Sample, Abundance), 
+    file = "summary_syrphid16S_March2024.tsv", sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+
+----------------
+#Stats and Plots
+----------------
+
+```{r load-more-packages}
+library(microbiome)
+library(ggpubr)
+library(knitr)
+library(ggtext)
+library(scales)
+library(ggside)
+library(RColorBrewer)
+```
+
+
+```{r rarefy-function-from-metagMisc}
+devtools::install_github("vmikk/metagMisc")
+library(metagMisc)
+```
+
+```{r rarefy-data, eval=FALSE}
+otu_table(p_data_taxlean) <- otu_table(t(otu_table(p_data_taxlean)), taxa_are_rows=TRUE)
+sample_size_quantile <- as.data.frame(quantile(sample_sums(p_data_taxlean), probs = c(0, 0.10, 0.15, 0.225, 0.25, 0.5, 0.75, 1)))
+sample_size_threshold <- sample_size_quantile["25%", ] # 14,021 reads
+p_data_taxlean_rr <- phyloseq_mult_raref_avg(p_data_taxlean, SampSize = sample_size_threshold, iter=1000, parallel = TRUE,verbose = TRUE)
+p_data_taxlean_rr <- transform_sample_counts(p_data_taxlean_rr, function(x){ x * sample_size_threshold})
+```
+
+Update: We now have Scott's isotope data for these samples. Let's add this new file as metadata.
+
+```{r update-metadata, eval=FALSE}
+metadata_isotope <- read_csv("../input/metadata_isotope.csv")
+metadata_merge_2 <- dplyr::left_join(metadata_merge, metadata_isotope, by="ID")
+row.names(metadata_merge_2) <- metadata_merge_2[,13]
+sample_data(p_data_taxlean_rr) <- metadata_merge_2
+```
+
+Let's start by visualizing the general alpha diversity between Eupeodes and Allograpta. For this section I will combine all bacterial taxa by genus. Next I will calculate alpha diversity using the Shannon index
+
+```{r combine-bac-by-family, eval=FALSE}
+pseq_alpha <-aggregate_taxa(p_data_taxlean_rr, level = "Genus")
+tab <-microbiome::diversity(pseq_alpha, index = "Shannon")
+```
+
+Extract and prepare dataframe for plotting alpha diversity as a violin plot
+Note: when plotting, the OnDemand rendering of Rstudio does not show some markdown text formatting, such as italicized or bold words
+```{r plot-violin-plots}
+pseq_alpha_meta <- microbiome::meta(pseq_alpha)
+pseq_alpha_meta$Shannon <- tab$shannon
+
+pseq_alpha_plot <- ggviolin(pseq_alpha_meta %>% mutate(Species = factor(Species, levels = c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus"))), x="Species", y="Shannon", add="boxplot", fill="Species")+scale_fill_manual(values = c("Allograpta obliqua" = "#FB9A99", "Eupeodes americanus" = "#E31A1C", "Eupeodes pomus" = "#FDBF6F"))
+
+p1 <- pseq_alpha_plot+ labs(
+  x = "Species",
+  y = "Shannon index",
+  title = "Microbiome Alpha Diversity in Hoverflies"
+) +
+  theme(
+    axis.title.x = element_markdown(),
+    axis.title.y = element_markdown()
+  )
+ggpar(p1, ylim = c(0, 3))
+```
+
+```{r save-alpha-diversity-plot, eval=FALSE}
+ggsave("./Figures/AlphaDiversity_genus_hoverfliesspp.pdf", width=15, height=10)
+```
+
+
+Let's learn what are the general numbers at this point, and find how many reads are gathered in the top 10 taxa
+```{r calculate-top-taxa-for-barplot}
+pseq_alpha # 129 taxa (aggregated at the Genus level)
+relative_taxa_abundance <- (taxa_sums(pseq_alpha))/sum(taxa_sums(pseq_alpha))
+sort(relative_taxa_abundance, TRUE)[1:10]
+sum(sort(relative_taxa_abundance, TRUE)[1:10])
+```
+
+Because Wolbachia is likely most of the reads (78.88%), let's visualize alpha diversity after removing Wolbachia
+```{r plot-violin-plots-2}
+pseq_alpha1 <-aggregate_taxa(p_data_taxlean_rr, level = "Genus") %>% subset_taxa(Genus != "Wolbachia")
+tab1 <-microbiome::diversity(pseq_alpha1, index = "Shannon")
+pseq_alpha_meta1 <- microbiome::meta(pseq_alpha1)
+pseq_alpha_meta1$Shannon <- tab1$shannon
+
+pseq_alpha_plot1 <- ggviolin(pseq_alpha_meta1 %>% mutate(Species = factor(Species, levels = c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus"))), x="Species", y="Shannon", add="boxplot", fill="Species")+scale_fill_manual(values = c("Allograpta obliqua" = "#FB9A99", "Eupeodes americanus" = "#E31A1C", "Eupeodes pomus" = "#FDBF6F"))
+
+p2 <- pseq_alpha_plot1+ labs(
+  x = "Species",
+  y = "Shannon index",
+  title = "Microbiome Alpha Diversity in Hoverflies \n after removing Wolbachia"
+) +
+  theme(
+    axis.title.x = element_markdown(),
+    axis.title.y = element_markdown()
+  )
+ggpar(p2, ylim = c(0, 3))
+```
+
+
+```{r save-alpha-diversity-plot2, eval=FALSE}
+ggsave("./Figures/AlphaDiversity_hoverfliesspp_noWolbachia.pdf", width=15, height=10)
+```
+
+How does relative abundance look like after we remove Wolbachia?
+```{r calculate-top-taxa-for-barplot1}
+pseq_alpha1 # 227 taxa (aggregated at the Genus level)
+relative_taxa_abundance1 <- (taxa_sums(pseq_alpha1))/sum(taxa_sums(pseq_alpha1))
+sort(relative_taxa_abundance1, TRUE)[1:10]
+sum(sort(relative_taxa_abundance1, TRUE)[1:10])
+sum(sort(relative_taxa_abundance1, TRUE)[1:8])
+```
+
+
+Approximately 8 taxa are responsible for 90% of all reads. I am interested in the top 90% only (just for plotting and having fewer taxa taking space in the caption, which helps the audience to visualize more important patterns). From the percentages displayed above, it seems like eight taxa may accumulate 90% of all reads. Let's see this compare to removing one taxa at a time, until we have only the top 5 taxa in the dataset.
+
+```{r top-90}
+sum(sort(relative_taxa_abundance1, TRUE)[1:8]) #90.7 %
+sum(sort(relative_taxa_abundance1, TRUE)[1:7]) #88.90 %
+sum(sort(relative_taxa_abundance1, TRUE)[1:6]) #86.35 %
+sum(sort(relative_taxa_abundance1, TRUE)[1:5]) #82.19 %
+sum(sort(relative_taxa_abundance1, TRUE)[1:4]) #77.56 %
+sum(sort(relative_taxa_abundance1, TRUE)[1:3]) #69.79 %
+```
+
+The top 3 taxa still represents a large amount of the dataset (69.79%). This indicates a pattern observed in other systems with co-evolution of gut microbes and host, where a few taxa are overly abundant, whereas a lot of taxa have very low abundance. In this case, 3 taxa are 69.79% of all data, whereas 125 taxa are the remaining 31.2% of the data. One caveat is that the most abundant "taxa" is "unknown", which is more likely a collection of different taxa. More on this in downstream steps of this analysis.
+
+Let's visualize these patterns using a barplot, for both data with and without Wolbachia.
+
+```{r preprare-data-for-barplot}
+
+# 1. Transform phyloseq object into a data frame
+pseq_barplot <- pseq_alpha %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
+        select(ASV, Kingdom, Phylum, Class, Order, Family, Genus, Sample, Abundance) %>% spread(Sample, Abundance)
+
+# 2. Taxa are rows. Create a column for summing all reads per taxa, and order taxa so that the most abundant taxa is listed first, then the second, third, etc. Next, create a column with the cumulative sums (i.e. row 1a = row1, row2a = row1 + row2, row3a = row1 + row2 + row3)
+
+pseq_barplot$abundance_sum <- rowSums(pseq_barplot[8:146])
+pseq_barplot <- pseq_barplot[order(-pseq_barplot$abundance_sum),]
+pseq_barplot <- pseq_barplot %>% mutate(cumulative_sums = cumsum(abundance_sum))
+
+# 3. Determine the threshold where cumulative abundance reaches 95%
+threshold <- sum(pseq_barplot$abundance_sum) * 0.95
+
+# 4. Create a new taxonomy table with the updated Genus information
+pseq_barplot$Genus <- ifelse(pseq_barplot$cumulative_sums >= threshold, "other", pseq_barplot$Genus)
+```
+
+```{r barplot-Wolbachia-included}
+# Join the pseq_barplot and metadata_merge
+data_combined <- pseq_barplot[7:146] %>%
+  gather(sample, count, -Genus) %>%
+  dplyr::left_join(metadata_merge, by = c("sample" = "old_ID"))
+
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(data_combined %>% filter(Species != "Eupeodes pomus"), aes(x = sample, y = count, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  facet_wrap(~Species, scale="free") + 
+  labs(title = "Hoverfly microbiome is dominated by Wolbachia",
+       x = "Samples",
+       y = "Relative Frequency") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank()) +
+  scale_fill_manual(values = c("Holzapfelia" = "black", "Wolbachia" = "#009E73", "other" = "darkgrey", "unknown" = "lightgrey", "Gilliamella" = "#CC79A7"))  # Customize fill colors
+```
+
+```{r save-barplot-yes_Wolbachia, eval=FALSE}
+ggsave("./Figures/hoverfliesspp_barplot.pdf", width=15, height=10)
+```
+
+
+```{r barplot-allograpta-obliqua-noWolbachia}
+# 1. Transform phyloseq object into a data frame
+# pseq_barplot_noWol <- pseq_alpha1 %>%  psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
+#        select(ASV, Kingdom, Phylum, Class, Order, Family, Genus, Sample, Abundance) %>% spread(Sample, Abundance)
+
+allograpta_barplot_noWol <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua") %>% subset_taxa(Genus != "Wolbachia") %>% aggregate_taxa(., level = "Genus") %>% prune_samples(sample_sums(.) > 1000, .) %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
+       select(ASV, Kingdom, Phylum, Class, Genus, Sample, Abundance) %>% spread(Sample, Abundance)
+
+# 2. Taxa are rows. Create a column for summing all reads per taxa, and order taxa so that the most abundant taxa is listed first, then the second, third, etc. Next, create a column with the cumulative sums (i.e. row 1a = row1, row2a = row1 + row2, row3a = row1 + row2 + row3)
+
+allograpta_barplot_noWol$abundance_sum <- rowSums(allograpta_barplot_noWol[6:27])
+allograpta_barplot_noWol <- allograpta_barplot_noWol[order(-allograpta_barplot_noWol$abundance_sum),]
+allograpta_barplot_noWol <- allograpta_barplot_noWol %>% mutate(cumulative_sums = cumsum(abundance_sum))
+
+# 3. Determine the threshold where cumulative abundance reaches 99%
+threshold_noWol <- sum(allograpta_barplot_noWol$abundance_sum) * 0.99
+
+# 4. Create a new taxonomy table with the updated Genus information
+allograpta_barplot_noWol$Genus <- ifelse(allograpta_barplot_noWol$cumulative_sums >= threshold_noWol, "other", allograpta_barplot_noWol$Genus)
+
+# Join the pseq_barplot and metadata_merge
+data_combined_noWol <- allograpta_barplot_noWol[5:27] %>%
+  gather(sample, count, -Genus) %>%
+  dplyr::left_join(metadata_merge, by = c("sample" = "old_ID"))
+
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(data_combined_noWol, aes(x = sample, y = count, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  facet_wrap(~Species, scale="free") + 
+  # labs(title = "Allograpta microbiome \n Wolbachia removed",
+  #      x = "Samples",
+  #      y = "Relative Frequency") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(),) 
+# +
+# scale_fill_manual(values = c("Holzapfelia" = "black", "other" = "darkgrey", "Unknown" = "darkgreen",
+#                              "Acinetobacter" = "#E69F00",
+#                              "Asaia" = "#F0E442",
+#                              "Erwinia" = "#0072B2",
+#                              "Gilliamella" = "#CC79A7",
+#                              "Saccharibacter" = "brown"))  # Customize fill colors
+```
+```{r save-allograpta-pcoa-nowol-order, eval=FALSE}
+ggsave("./Figures/allograpta-barplot-noWol.pdf", width=15, height=10)
+ggsave("./Figures/allograpta-barplot-noWol.png", width=15, height=10)
+```
+
+```{r barplot-eupeodes-noWolbachia}
+# 1. Transform phyloseq object into a data frame
+# pseq_barplot_noWol <- pseq_alpha1 %>%  psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
+#        select(ASV, Kingdom, Phylum, Class, Order, Family, Genus, Sample, Abundance) %>% spread(Sample, Abundance)
+
+eupeodes_barplot_noWol <- p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus" | Species == "Eupeodes pomus") %>% subset_taxa(Genus != "Wolbachia") %>% aggregate_taxa(., level = "Genus") %>% prune_samples(sample_sums(.) > 1000, .) %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
+       select(ASV, Kingdom, Phylum, Class, Genus, Sample, Abundance) %>% spread(Sample, Abundance)
+
+# 2. Taxa are rows. Create a column for summing all reads per taxa, and order taxa so that the most abundant taxa is listed first, then the second, third, etc. Next, create a column with the cumulative sums (i.e. row 1a = row1, row2a = row1 + row2, row3a = row1 + row2 + row3)
+
+eupeodes_barplot_noWol$abundance_sum <- rowSums(eupeodes_barplot_noWol[6:35])
+eupeodes_barplot_noWol <- eupeodes_barplot_noWol[order(-eupeodes_barplot_noWol$abundance_sum),]
+eupeodes_barplot_noWol <- eupeodes_barplot_noWol %>% mutate(cumulative_sums = cumsum(abundance_sum))
+
+# 3. Determine the threshold where cumulative abundance reaches 90%
+threshold_noWol <- sum(eupeodes_barplot_noWol$abundance_sum) * 0.95
+
+# 4. Create a new taxonomy table with the updated Genus information
+eupeodes_barplot_noWol$Genus <- ifelse(eupeodes_barplot_noWol$cumulative_sums >= threshold_noWol, "other", eupeodes_barplot_noWol$Genus)
+
+# Join the pseq_barplot and metadata_merge
+data_combined_noWol <- eupeodes_barplot_noWol[5:35] %>%
+  gather(sample, count, -Genus) %>%
+  dplyr::left_join(metadata_merge, by = c("sample" = "old_ID"))
+
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(data_combined_noWol, aes(x = sample, y = count, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  facet_wrap(~Species, scale="free") + 
+  # labs(title = "Eupeodes microbiome \n Wolbachia removed",
+  #      x = "Samples",
+  #      y = "Relative Frequency") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank()) 
+# +
+# scale_fill_manual(values = c("Holzapfelia" = "black", "other" = "darkgrey", "Unknown" = "darkgreen",
+#                              "Acinetobacter" = "#E69F00",
+#                              "Asaia" = "#F0E442",
+#                              "Erwinia" = "#0072B2",
+#                              "Gilliamella" = "#CC79A7",
+#                              "Saccharibacter" = "brown"))  # Customize fill colors
+```
+
+```{r save-eupeodes-pcoa-nowol, eval=FALSE}
+ggsave("./Figures/Eupeodes_noWol.pdf", width=15, height=10)
+ggsave("./Figures/Eupeodes_noWol.png", width=15, height=10)
+```
+
+The plot above is not good for visualization, since most Genus is "unknown", which makes this plot a little uninformative. Perhaps at the Family level there would be fewer unknown taxa, and the visualization will be more relevant. 
+```{r barplot-per-spp-noWolbachia}
+# 1. Transform phyloseq object into a data frame
+pseq_barplot_noWol <- p_data_taxlean_rr %>% subset_taxa(Genus != "Wolbachia"| is.na(Genus)) %>% aggregate_taxa(level = "Family")  %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>% select(ASV, Family, Sample, Abundance) %>% spread(Sample, Abundance)
+
+# 2. Taxa are rows. Create a column for summing all reads per taxa, and order taxa so that the most abundant taxa is listed first, then the second, third, etc. Next, create a column with the cumulative sums (i.e. row 1a = row1, row2a = row1 + row2, row3a = row1 + row2 + row3)
+
+pseq_barplot_noWol$abundance_sum <- rowSums(pseq_barplot_noWol[3:141])
+pseq_barplot_noWol <- pseq_barplot_noWol[order(-pseq_barplot_noWol$abundance_sum),]
+pseq_barplot_noWol <- pseq_barplot_noWol %>% mutate(cumulative_sums = cumsum(abundance_sum))
+
+# 3. Determine the threshold where cumulative abundance reaches 90%
+threshold_noWol <- sum(pseq_barplot_noWol$abundance_sum) * 0.9
+
+# 4. Create a new taxonomy table with the updated Genus information
+pseq_barplot_noWol$Family <- ifelse(pseq_barplot_noWol$cumulative_sums >= threshold_noWol, "other", pseq_barplot_noWol$Family)
+
+# Join the pseq_barplot and metadata_merge
+data_combined_noWol <- pseq_barplot_noWol[2:141] %>%
+  gather(sample, count, -Family) %>%
+  dplyr::left_join(metadata_merge, by = c("sample" = "old_ID"))
+
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(data_combined_noWol %>% filter(Species != "Eupeodes pomus"), aes(x = sample, y = count, fill = Family)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  facet_wrap(~Species, scale="free") + 
+  labs(title = "Hoverfly microbiome \n Wolbachia removed",
+       x = "Samples",
+       y = "Relative Frequency") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank()) + scale_fill_manual(values = c("other" = "darkgrey", "Unknown" = "lightgrey",
+                             "Acetobacteraceae" = "#56B4E9",
+                             "Lactobacillaceae" = "#F0E442",
+                             "Erwiniaceae" = "#D55E00",
+                             "Orbaceae" = "#CC79A7",
+                             "Enterobacteriaceae" = "#009E73"))
+```
+
+```{r save barplot-Family-noWol, eval=FALSE}
+ggsave("./Figures/barplot_Family_noWol_Syr16S.pdf", width=15, height=10)
+```
+
+```{r PcoA-all-spp}
+pseq_beta <- p_data_taxlean_rr
+dist = phyloseq::distance(pseq_beta, method="bray")
+ordination = ordinate(pseq_beta, method="PCoA", distance=dist)
+plot_ordination(pseq_beta, ordination, color="Species") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set1") +
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+#ggsave("./Figures/PCA_euclidean.pdf", width=15, height=10)
+```
+
+```{r save-PCoA, eval=FALSE}
+ggsave("./Figures/PCoA_Syr16S_allspp.pdf", width=15, height=10)
+```
+
+```{r PcoA-all-spp-noEupeodespomus}
+pseq_beta_nopomus <- p_data_taxlean_rr %>% subset_samples(Species != "Eupeodes pomus")
+dist_nop = phyloseq::distance(pseq_beta_nopomus, method="bray")
+ordination_nop = ordinate(pseq_beta_nopomus, method="PCoA", distance=dist_nop)
+plot_ordination(pseq_beta_nopomus, ordination_nop, color="Species") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set1") +
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+#ggsave("./Figures/PCA_euclidean.pdf", width=15, height=10)
+```
+
+```{r save-eupeodes-pcoa-nopomus, eval=FALSE}
+ggsave("./Figures/All_spp_PCoA_Bray-curtis_high_quality_samples_nopomus.pdf", width=15, height=10)
+ggsave("./Figures/All_spp_PCoA_Bray-curtis_high_quality_samples_nopomus.png", width=15, height=10)
+```
+
+```{r PcoA-per-spp-Eupeodes}
+# Eupeodes americanus and Eupeodes pomus
+pseq_beta_eupeodes <- p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus" | Species == "Eupeodes pomus") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus))
+pseq_beta_eupeodes <- prune_taxa(taxa_sums(pseq_beta_eupeodes) > 10, pseq_beta_eupeodes)
+pseq_beta_eupeodes <- prune_samples(sample_sums(pseq_beta_eupeodes) > 1000, pseq_beta_eupeodes)
+dist = phyloseq::distance(pseq_beta_eupeodes, method="bray")
+ordination = ordinate(pseq_beta_eupeodes, method="PCoA", distance=dist)
+plot_ordination(pseq_beta_eupeodes, ordination, color="S_W_N", shape = "Species") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set1") +
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+```
+```{r save-eupeodes-pcoa-highquality, eval=FALSE}
+ggsave("./Figures/Eupeodes_PCoA_Bray-curtis_high_quality_samples.pdf", width=15, height=10)
+ggsave("./Figures/Eupeodes_PCoA_Bray-curtis_high_quality_samples.png", width=15, height=10)
+```
+
+
+```{r PcoA-per-spp-Eupeodes-nopomus}
+# Eupeodes americanus and Eupeodes pomus
+pseq_beta_eupeodesnp <- p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus))
+pseq_beta_eupeodesnp <- prune_taxa(taxa_sums(pseq_beta_eupeodesnp) > 10, pseq_beta_eupeodesnp)
+pseq_beta_eupeodesnp <- prune_samples(sample_sums(pseq_beta_eupeodesnp) > 1000, pseq_beta_eupeodesnp)
+distnp = phyloseq::distance(pseq_beta_eupeodesnp, method="bray")
+ordinationnp = ordinate(pseq_beta_eupeodesnp, method="PCoA", distance=distnp)
+plot_ordination(pseq_beta_eupeodesnp, ordinationnp, color="S_W_N", shape = "Season") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set2") +
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+```
+
+```{r save-eupeodes-pcoa-nopomus-season, eval=FALSE}
+ggsave("./Figures/Eupeodesnp_PCoA_Bray-curtis_high_quality_samples.pdf", width=15, height=10)
+ggsave("./Figures/Eupeodesnp_PCoA_Bray-curtis_high_quality_samples.png", width=15, height=10)
+```
+
+```{r PcoA-per-spp-Eupeodes-season}
+# Eupeodes americanus and Eupeodes pomus
+pseq_beta_eupeodes <- p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus" | Species == "Eupeodes pomus") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus))
+pseq_beta_eupeodes <- prune_taxa(taxa_sums(pseq_beta_eupeodes) > 10, pseq_beta_eupeodes)
+pseq_beta_eupeodes <- prune_samples(sample_sums(pseq_beta_eupeodes) > 1000, pseq_beta_eupeodes)
+dist = phyloseq::distance(pseq_beta_eupeodes, method="bray")
+ordination = ordinate(pseq_beta_eupeodes, method="PCoA", distance=dist)
+plot_ordination(pseq_beta_eupeodes, ordination, color="Season", shape = "Species") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set2") +
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+```
+
+```{r save-eupeodes-pcoa-season, eval=FALSE}
+ggsave("./Figures/Eupeodes_PCoA_Bray-curtis_season.pdf", width=15, height=10)
+ggsave("./Figures/Eupeodes_PCoA_Bray-curtis_season.png", width=15, height=10)
+```
+
+```{r PcoA-per-spp-Eupeodes-nopomus-season}
+# Eupeodes americanus and Eupeodes pomus
+pseq_beta_eupeodesnp <- p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus))
+pseq_beta_eupeodesnp <- prune_taxa(taxa_sums(pseq_beta_eupeodesnp) > 10, pseq_beta_eupeodesnp)
+pseq_beta_eupeodesnp <- prune_samples(sample_sums(pseq_beta_eupeodesnp) > 1000, pseq_beta_eupeodesnp)
+distnp = phyloseq::distance(pseq_beta_eupeodesnp, method="bray")
+ordinationnp = ordinate(pseq_beta_eupeodesnp, method="PCoA", distance=distnp)
+plot_ordination(pseq_beta_eupeodesnp, ordinationnp, color="Season", shape = "Species") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set2") +
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+```
+
+```{r save-eupeodes-no-pomus-pcoa, eval=FALSE}
+ggsave("./Figures/eupeodes_hq-nopomus-pcoa-braycurtis.pdf", width=15, height=10)
+ggsave("./Figures/eupeodes_hq-nopomus-pcoa-braycurtis.pdf.png", width=15, height=10)
+```
+
+```{r eupeodes-with-labels}
+plot_ordination(pseq_beta_eupeodes, ordination, color="S_W_N", shape = "Species") + 
+  geom_point(size=2, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set1") +
+  theme(strip.background = element_blank(), text = element_text(size = 12)) + geom_label_repel(aes(label = ID), box.padding = 0.35, point.padding = 0.5, segment.color = "grey50", max.overlaps = Inf) + theme_classic()
+#ggsave("./Figures/Eupeodes_PCoA_Bray-curtis_samplelabels.pdf", width=15, height=10)
+#ggsave("./Figures/Eupeodes_PCoA_Bray-curtis_sample_labels.png", width=15, height=10)
+```
+
+```{r PcoA-per-spp-Allograpta}
+# Allograpta
+pseq_beta_allograpta <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus)) 
+pseq_beta_allograpta <- prune_taxa(taxa_sums(pseq_beta_allograpta) > 10, pseq_beta_allograpta)
+pseq_beta_allograpta <- prune_samples(sample_sums(pseq_beta_allograpta) > 1000, pseq_beta_allograpta)
+dist = phyloseq::distance(pseq_beta_allograpta, method="bray")
+ordination = ordinate(pseq_beta_allograpta, method="PCoA", distance=dist)
+plot_ordination(pseq_beta_allograpta, ordination, color="S_W_N", shape = "Season") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set2") + 
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+```
+
+
+```{r save-allograpta-pcoa, eval=FALSE}
+ggsave("./Figures/allograta-pcoa-braycurtis.pdf", width=15, height=10)
+ggsave("./Figures/allograta-pcoa-braycurtis.png", width=15, height=10)
+```
+
+```{r PcoA-per-spp-Allograpta-labelled-samples}
+# Allograpta
+library(ggrepel)
+pseq_beta_allograpta <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus)) 
+pseq_beta_allograpta <- prune_taxa(taxa_sums(pseq_beta_allograpta) > 10, pseq_beta_allograpta)
+pseq_beta_allograpta <- prune_samples(sample_sums(pseq_beta_allograpta) > 1000, pseq_beta_allograpta)
+dist = phyloseq::distance(pseq_beta_allograpta, method="bray")
+ordination = ordinate(pseq_beta_allograpta, method="PCoA", distance=dist)
+plot_ordination(pseq_beta_allograpta, ordination, color="S_W_N", shape = "Species") + 
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set1") +
+  theme(strip.background = element_blank(), text = element_text(size = 12)) + geom_label_repel(aes(label = ID), box.padding = 0.35, point.padding = 0.5, segment.color = "grey50", max.overlaps = Inf) + theme_classic()
+```
+
+```{r save-allograpta-pcoa-with-sample-names, eval=FALSE}
+ggsave("./Figures/allograpta-pcoa-with-labels.pdf", width=15, height=10)
+ggsave("./Figures/allograpta-pcoa-with-labels.png", width=15, height=10)
+```
+
+```{r PcoA-per-spp-Allograpta-season}
+# Allograpta
+pseq_beta_allograpta <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus)) 
+pseq_beta_allograpta <- prune_taxa(taxa_sums(pseq_beta_allograpta) > 10, pseq_beta_allograpta)
+pseq_beta_allograpta <- prune_samples(sample_sums(pseq_beta_allograpta) > 1000, pseq_beta_allograpta)
+dist = phyloseq::distance(pseq_beta_allograpta, method="bray")
+ordination = ordinate(pseq_beta_allograpta, method="PCoA", distance=dist)
+plot_ordination(pseq_beta_allograpta, ordination, color="Season", shape = "Species") + 
+  theme_classic() +
+  geom_point(size=8, alpha = 0.99) + scale_colour_brewer(type="qual", palette="Set1") +
+  theme(strip.background = element_blank(), text = element_text(size = 16)) 
+```
+
+```{r save-allograpta-pcoa-season, eval=FALSE}
+ggsave("./Figures/allograpta-pcoa-bray-curtis-season.pdf", width=15, height=10)
+ggsave("./Figures/allograpta-pcoa-bray-curtis-season.png", width=15, height=10)
+```
+
+------------------
+```{r general-statistics}
+library(vegan)
+syrphid_microbe_dist <- phyloseq::distance(p_data_taxlean_rr, method = "bray")
+Migrant <- sample_data(p_data_taxlean_rr)$MigratoryStatus
+SampleSpecies <- sample_data(p_data_taxlean_rr)$Species
+adonis2(formula = syrphid_microbe_dist ~ SampleSpecies) # microbiome may be specific to each species
+```
+
+
+```{r species-specific-statistics}
+Allograpta_microbe_dist <- phyloseq::distance(p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua"), method="bray")
+Migrant_allo <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua"))$MigratoryStatus
+S_W_N_allo <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua"))$S_W_N
+Season_allo <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua"))$Season
+Year_allo <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua"))$Year
+adonis2(formula = Allograpta_microbe_dist ~ Year_allo) # Year is not significant, therefore we don't need to block data by year
+adonis2(formula = Allograpta_microbe_dist ~ Migrant_allo) # Whether migrant or not, microbiota is still the same
+adonis2(formula = Allograpta_microbe_dist ~ S_W_N_allo) # Significant! Samples from N, S or W do not exactly share the same microbiota
+```
+
+```{r Allograpta-specific-stats}
+allograpta_filtered <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua" & S_W_N != "West") %>% 
+                                       subset_taxa(Genus != "Wolbachia" | is.na(Genus)) %>% 
+                                       prune_taxa(taxa_sums(.) > 10, .) %>% 
+                                       prune_samples(sample_sums(.) > 1000, .)
+S_W_N_allo_filtered <- sample_data(allograpta_filtered)$S_W_N
+allograpta_filtered_dist <- phyloseq::distance(allograpta_filtered, method="bray")
+adonis2(formula = allograpta_filtered_dist ~ S_W_N_allo_filtered)
+```
+
+# How about Eupeodes? We will focus on Euepeodes americanus only
+```{r General-Eupeodes-statistics}
+EA_microbe_dist <- phyloseq::distance(p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus"), method="bray")
+Migrant_ea <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus"))$MigratoryStatus
+S_W_N_ea <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus"))$S_W_N
+Season_ea <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus"))$Season
+Year_ea <- sample_data(p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus"))$Year
+adonis2(formula = EA_microbe_dist ~ Year_ea) # Year is not significant, therefore we don't need to block data by year
+adonis2(formula = EA_microbe_dist ~ Migrant_ea) # Whether migrant or not, microbiota is still the same
+adonis2(formula = EA_microbe_dist ~ S_W_N_ea) # Not significant! This meets our prediction, since EA is migrant and exchange microbiota more often at a wider geographical range than "Allograpta obliqua"
+```
+
+Eupeodes seem to fit our predictions on microbiota: by traveling, there is homogeneization of microbiota between individuals collected North or South. What if we filter Wolbachia out and compare individuals only from North and South, with higher depth of sequencing, and excluding rare (likely spurious) data?
+```{r Euepeodes-specific-stats}
+EA_filtered <- p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus" & S_W_N != "West") %>% 
+                                       subset_taxa(Genus != "Wolbachia" | is.na(Genus)) %>% 
+                                       prune_taxa(taxa_sums(.) > 10, .) %>% 
+                                       prune_samples(sample_sums(.) > 1000, .)
+S_W_N_ea_filtered <- sample_data(EA_filtered)$S_W_N
+EA_filtered_dist <- phyloseq::distance(EA_filtered, method="bray")
+adonis2(formula = EA_filtered_dist ~ S_W_N_ea_filtered) # Consistent with the previous result, region North or South does not explain microbiota variation in Eupeodes
+```
+
+
+Could season or migratory status make these results different?
+```{r species-specific-stats-part-II}
+season_ao <- sample_data(allograpta_filtered)$Season
+migrant_ao <- sample_data(allograpta_filtered)$MigratoryStatus
+migrant_ea <- sample_data(EA_filtered)$MigratoryStatus
+season_ea <- sample_data(EA_filtered)$Season
+
+adonis2(formula = allograpta_filtered_dist ~ season_ao)
+adonis2(formula = EA_filtered_dist ~ season_ea) 
+
+adonis2(formula = allograpta_filtered_dist ~ S_W_N_allo_filtered*season_ao*migrant_ao)
+adonis2(formula = EA_filtered_dist ~ S_W_N_ea_filtered*season_ea*migrant_ea) 
+```
+In conclusion, individuals of the species _Allograpta_ _obliqua_, considered a non-migratory species, show microbiota communities that differ between North (Canada) and South (South US) samples, and these differences are not explained by season or year of sampling. On the other hand, the migratory species _Eupeodes_ _americanus_ harbours microbiota that has similar composition between individuals collected northern sites and individuals collected in southern sites.
+
+What bacteria contributes most for these differences? I will test using ANCOM-BC (Lin & Peddada, 2020)
+
+First, let me test bacteria contributing to differences at the genus level, for the whole dataset
+
+```{r ancombc-species-data}
+out_spp <- ancombc(data=NULL, assay_name = NULL, tax_level= "Genus", phyloseq = p_data_taxlean_rr %>%
+                     subset_samples(Species != "Eupeodes pomus"),
+               formula = "Species", p_adj_method = "holm", prv_cut = 0.10, lib_cut = 0, group = NULL,
+               neg_lb = TRUE, tol = 1e-5, max_iter = 100, conserve = TRUE, alpha = 0.05, n_cl = 1, 
+               verbose = TRUE)
+res_s = out_spp$res
+res_global_s = out_spp$res_global
+
+tab_lfc_s = res_s$lfc
+col_name_s = c("Taxon", "Intercept", "Allograpta - Eupeodes")
+colnames(tab_lfc_s) = col_name_s
+tab_lfc_s %>% 
+  datatable(caption = "Log Fold Changes from the Primary Result") %>%
+  formatRound(col_name_s[-1], digits = 2)
+tab_p_s = res_s$p_val #p-values
+colnames(tab_p_s) = col_name_s
+tab_p_s %>% 
+  datatable(caption = "P-values from the Primary Result") %>%
+  formatRound(col_name_s[-1], digits = 2)
+tab_q_s = res_s$q #adjusted p-values
+colnames(tab_q_s) = col_name_s
+tab_q_s %>% 
+  datatable(caption = "Adjusted p-values from the Primary Result") %>%
+  formatRound(col_name_s[-1], digits = 2)
+tab_diff_s = res_s$diff_abn #differential abundance results
+colnames(tab_diff_s) = col_name_s
+tab_diff_s %>% 
+  datatable(caption = "Differentially Abundant Taxa from the Primary Result")
+```
+
+A few genera are differentially abundant in Eupeodes compared to Allograpta. Let me see the differences using a more sensitive test, lefse.
+```{r using-microbiomeMarker-package-lefse-two-species}
+BiocManager::install("microbiomeMarker") #install microbiomeMarker
+library(microbiomeMarker)
+all_lefse <- run_lefse(p_data_taxlean_rr %>%
+                     subset_samples(Species != "Eupeodes pomus"), taxa_rank = "Genus", wilcoxon_cutoff = 0.01, group = "Species", kw_cutoff = 0.01, multigrp_strat = TRUE, lda_cutoff = 4, norm = "CPM")
+plot_abundance(all_lefse, group = "Species")
+```
+```{r save-allograpta-failed-lefse}
+ggsave("./Figures/lefse_allspp.pdf", width=15, height=10)
+ggsave("./Figures/lefse_allspp.png", width=15, height=10)
+```
+
+Out of curiosity, is it possible to define a core microbiota for Allograpta and for Eupeodes? Perhaps for Allograpta it makes more sense to divide core microbiota of N samples versus S samples
+
+```{r core-microbiota-define-core}
+# To test this, I am going to use rarefied data, as a previous test with non-rarefied data showed to be less sensitive to presence or absence of some ASV; while I don't have a definitive explanation for that, since non-rarefied data would presumably preserve more rare spp. that are lost after rarefying data, I believe that rarefying data gets rid of shallowly sequenced samples or samples that are overwhelmingly composed of Wolbachia, which results in selecting samples that are more deeper sequenced and, therefore, contain more ASV shared among them.
+physeq.all.spp <- p_data_taxlean_rr %>%
+                     subset_samples(Species != "Eupeodes pomus")
+
+# convert to relative abundance  
+physeq.all.rel <- microbiome::transform(physeq.all.spp, "compositional")
+
+physeq.all.rel2 <- prune_taxa(taxa_sums(physeq.all.rel) > 0, physeq.all.rel)
+
+core.taxa.standard <- core_members(physeq.all.rel2, detection = 0.001, prevalence = 50/100)
+print(core.taxa.standard)
+```
+
+Because Wolbachia is so overwhelmingly present in the dataset, ASV1 is detected as the only core member. Let me remove all Wolbachia and run this test again. In addition, let me do this analysis separately for Allograpta and for Eupeodes.
+```{r core-microbiota-define-core-Wolbachia-removed}
+physeq.ao <- p_data_taxlean_rr %>%
+                     subset_samples(Species == "Allograpta obliqua") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus))
+
+# convert to relative abundance  
+physeq.ao.rel <- microbiome::transform(physeq.ao, "compositional")
+
+physeq.ao.rel2 <- prune_taxa(taxa_sums(physeq.ao.rel) > 0, physeq.ao.rel)
+
+core.taxa.ao.standard <- core_members(physeq.ao.rel2, detection = 0.001, prevalence = 50/100)
+print("All Allograpta obliqua")
+print(core.taxa.ao.standard)
+
+#investigate North Allograpta
+physeq.aoNorth.rel <- microbiome::transform(physeq.ao %>% subset_samples(S_W_N == "North"), "compositional")
+
+physeq.aoNorth.rel2 <- prune_taxa(taxa_sums(physeq.aoNorth.rel) > 0, physeq.aoNorth.rel)
+
+core.taxa.aoNorth.standard <- core_members(physeq.aoNorth.rel2, detection = 0.001, prevalence = 50/100)
+print("North")
+print(core.taxa.aoNorth.standard)
+
+#investigate South Allograpta
+physeq.aoSouth.rel <- microbiome::transform(physeq.ao %>% subset_samples(S_W_N == "South"), "compositional")
+
+physeq.aoSouth.rel2 <- prune_taxa(taxa_sums(physeq.aoSouth.rel) > 0, physeq.aoSouth.rel)
+
+core.taxa.aoSouth.standard <- core_members(physeq.aoSouth.rel2, detection = 0.001, prevalence = 50/100)
+print("South")
+print(core.taxa.aoSouth.standard)
+```
+
+Next, investigate the Eupeodes americanus core microbiota
+```{r core-microbiota-define-core-EA-Wolbachia-removed}
+physeq.ea <- p_data_taxlean_rr %>%
+                     subset_samples(Species == "Eupeodes americanus") %>% subset_taxa(Genus != "Wolbachia" | is.na(Genus))
+
+# convert to relative abundance  
+physeq.ea.rel <- microbiome::transform(physeq.ea, "compositional")
+
+physeq.ea.rel2 <- prune_taxa(taxa_sums(physeq.ea.rel) > 0, physeq.ea.rel)
+
+core.taxa.ea.standard <- core_members(physeq.ea.rel2, detection = 0.001, prevalence = 50/100)
+print("Eupeodes americanus core microbiota")
+print(core.taxa.ea.standard)
+```
+
+Who are ASV3 and ASV5?
+```{r further-investigate-Eupeodes-americanus-core-microbiota}
+# Extract the taxonomy table
+taxonomy_core_ea <- as.data.frame(tax_table(physeq.ea.rel2))
+
+# Subset this taxonomy table to include only core OTUs
+core_taxa_id_ea <- subset(taxonomy_core_ea, rownames(taxonomy_core_ea) %in% core.taxa.ea.standard)
+
+DT::datatable(core_taxa_id_ea)
+```
+
+
+Let us test differences more specific to Allograpta.
+```{r ancom-bc-allograpta}
+library("ANCOMBC")
+#install.packages("DT")
+library(DT)
+allograpta_N_S_only <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua" & S_W_N != "West")
+out <- ancombc(data=NULL, assay_name = NULL, tax_level= "Genus", phyloseq = allograpta_N_S_only,
+               formula = "S_W_N", p_adj_method = "holm", prv_cut = 0.10, lib_cut = 0, group = NULL,
+               neg_lb = TRUE, tol = 1e-5, max_iter = 100, conserve = TRUE, alpha = 0.05, n_cl = 1, 
+               verbose = TRUE)
+res = out$res
+res_global = out$res_global
+
+tab_lfc = res$lfc
+col_name = c("Taxon", "Intercept", "North - South")
+colnames(tab_lfc) = col_name
+tab_lfc %>% 
+  datatable(caption = "Log Fold Changes from the Primary Result") %>%
+  formatRound(col_name[-1], digits = 2)
+tab_p = res$p_val #p-values
+colnames(tab_p) = col_name
+tab_p %>% 
+  datatable(caption = "P-values from the Primary Result") %>%
+  formatRound(col_name[-1], digits = 2)
+tab_q = res$q #adjusted p-values
+colnames(tab_q) = col_name
+tab_q %>% 
+  datatable(caption = "Adjusted p-values from the Primary Result") %>%
+  formatRound(col_name[-1], digits = 2)
+tab_diff = res$diff_abn #differential abundance results
+colnames(tab_diff) = col_name
+tab_diff %>% 
+  datatable(caption = "Differentially Abundant Taxa from the Primary Result")
+```
+
+
+Saccharibacter is identified as differentially abundant between North and South samples. 
+
+```{r using-microbiomeMarker-package}
+#BiocManager::install("microbiomeMarker") #install microbiomeMarker
+library(microbiomeMarker)
+ao_lefse <- run_lefse(allograpta_N_S_only, taxa_rank = "Genus", wilcoxon_cutoff = 0.01, group = "S_W_N", kw_cutoff = 0.01, multigrp_strat = TRUE, 
+                      lda_cutoff = 4, norm = "CPM")
+plot_abundance(ao_lefse, group = "S_W_N")
+```
+
+
+
+```{r save-allograpta-lefse}
+ggsave("./Figures/lefse_allograpta-unfiltered.pdf", width=15, height=10)
+ggsave("./Figures/lefse_allograpta-unfriltered.png", width=15, height=10)
+```
+
+
+
+```{r ancombc-for-filtered-data}
+out_filt <- ancombc(data=NULL, assay_name = NULL, tax_level= "Genus", phyloseq = allograpta_filtered,
+               formula = "S_W_N", p_adj_method = "holm", prv_cut = 0.10, lib_cut = 0, group = NULL,
+               neg_lb = TRUE, tol = 1e-5, max_iter = 100, conserve = TRUE, alpha = 0.05, n_cl = 1, 
+               verbose = TRUE)
+res_filt = out_filt$res
+res_global_filt = out_filt$res_global
+
+tab_lfc_filt = res_filt$lfc
+col_name_f = c("Taxon", "Intercept", "North - South")
+colnames(tab_lfc_filt) = col_name_f
+tab_lfc_filt %>% 
+  datatable(caption = "Log Fold Changes from the Primary Result") %>%
+  formatRound(col_name_f[-1], digits = 2)
+tab_p_filt = res_filt$p_val #p-values
+colnames(tab_p_filt) = col_name_f
+tab_p_filt %>% 
+  datatable(caption = "P-values from the Primary Result") %>%
+  formatRound(col_name_f[-1], digits = 2)
+tab_q_f = res_filt$q #adjusted p-values
+colnames(tab_q_f) = col_name_f
+tab_q_f %>% 
+  datatable(caption = "Adjusted p-values from the Primary Result") %>%
+  formatRound(col_name_f[-1], digits = 2)
+tab_diff_f = res_filt$diff_abn #differential abundance results
+colnames(tab_diff_f) = col_name_f
+tab_diff_f %>% 
+  datatable(caption = "Differentially Abundant Taxa from the Primary Result")
+```
+
+
+Adjusted p-values show once again that Saccharibacter explains most variation between N and S samples. However, with the filtered data, it seems like Acetobacter and Holzapfelia are marginally significant, with padj values 0.06 and 0.08 respectively. ANCOMBC seems to be a more conservative approach and less sensitive than other methods. Let me see how lefse would do with the filtered dataset.
+
+```{r lefse-filtered-allograpta}
+ao_lefsef <- run_lefse(allograpta_filtered, taxa_rank = "Genus", wilcoxon_cutoff = 0.01, group = "S_W_N", kw_cutoff = 0.01, multigrp_strat = TRUE, 
+                      lda_cutoff = 4, norm = "CPM")
+p <- plot_abundance(ao_lefsef, group = "S_W_N") #plot is currently displaying wrong information in the Y axis
+p
+```
+
+------------------
+Another way of looking at this data is by focusing on Wolbachia, instead of ignoring it. If populations of syrphids are teeming with Wolbachia, would it be possible that populations that are more isolated from each other would also have different Wolbachia?
+
+Let's take a look at the Allograpta Wolbachia. How many different ASV are identified as Wolbachia?
+```{r allograta-wolbachia-count}
+wolbachia_allograpta <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua") %>% subset_taxa(Genus == "Wolbachia")
+otu_table(wolbachia_allograpta)[,1:5]
+otu_table(wolbachia_allograpta) %>% rowSums()
+```
+
+There are five ASV identified as Wolbachia assoicated with Allograpta, with ASV1 representing the vast majority of Wolbachia in this dataset. How about Eupeodes, the migratory species?
+
+```{r eupeodes-wolbachia-count}
+wolbachia_eupeodes <- p_data_taxlean_rr %>% subset_samples(Species == "Eupeodes americanus") %>% subset_taxa(Genus == "Wolbachia")
+otu_table(wolbachia_eupeodes)[,1:5]
+otu_table(wolbachia_eupeodes) %>% rowSums()
+```
+
+Only two types of Wolbachia found associated with _Eupeodes_. In this case, ASV2 represents the most common Eupeodes-associated Wolbachia.
+
+From these patterns, it seems like ASV1 is more specific to Allograpta, whereas Eupeodes associates mostly with ASV2. Therefore, these doesn't seem to exist a pattern of geographical distribution of different types of Wolbachia. Perhaps level of infection/incidence might be different. That is, are there fewer infected individuals in one region compared to another, and does that reflect whether host species is migratory? Let's see.
+
+```{r allograta-wolbachia-incidence}
+p <- ggbarplot(psmelt(wolbachia_eupeodes) %>% filter(OTU=="ASV1" | OTU=="ASV2"), x="S_W_N", y="Abundance", add="mean", fill="OTU", facet.by="OTU", title = "Wolbachia mean counts in Eupeodes")
+q <- ggbarplot(psmelt(wolbachia_allograpta) %>% filter(OTU=="ASV1" | OTU=="ASV2"), x="S_W_N", y="Abundance", add="mean", fill="OTU", facet.by="OTU", title = "Wolbachia mean counts in Allograpta")
+p
+q
+```
+
+```{r investigate-Wolbachia, eval=FALSE}
+allo_wol_swn <- wolbachia_allograpta %>% subset_samples(S_W_N == "South" | S_W_N == "North")
+dfs <- meta(allo_wol_swn)
+dfs$signal <- abundances(allo_wol_swn)["ASV1", rownames(dfs)]
+dfs <- dfs %>% filter(signal > 10000)
+
+library(lme4)
+out <- lmer(signal ~ S_W_N + (1|Year), data= dfs)
+out0 <- lmer(signal ~ (1|Year), data=dfs)
+comp <- anova(out0, out)
+pv <- comp[["Pr(>Chisq)"]][[2]]
+print(pv)
+hist(resid(out))
+# install.packages("glmmTMB")
+# 
+# library(glmmTMB)
+# mod1 = glmmTMB(round(signal,0)~S_W_N + (1|Year),data = dfs %>% filter(S_W_N %in% c("North","South")) %>% , family = nbinom2())
+# hist(resid(mod1))
+# car::Anova(mod1,type = 2)
+```
+
+
+```{r lefse-analysis, eval=FALSE}
+#library(lefser)
+#library(mia)
+
+#First, transform data into a tree summarized experiment object, using this function from the mia package
+# data_for_lefser <- p_data_taxlean_rr %>% subset_samples(Species == "Allograpta obliqua") %>% subset_taxa(Genus != "Wolbachia") %>%
+#   subset_samples(S_W_N != "West") %>% prune_samples(sample_sums(.) > 100, .)
+# summarized_experiment <- makeTreeSEFromPhyloseq(data_for_lefser)
+# summarized_experiment <- relativeAb(summarized_experiment)
+# assay(summarized_experiment) = assay(summarized_experiment)*1e6
+# res <- lefser(summarized_experiment, groupCol = "S_W_N")
+
+data_for_lefser <- p_data_taxlean_rr %>% subset_samples(Species != "Eupeodes pomus") %>% subset_taxa(Genus != "Wolbachia") %>% subset_samples(S_W_N != "West") %>% prune_samples(sample_sums(.) > 100, .) %>% transform_sample_counts(., function(x) x/ sum(x)) %>%
+  filter_taxa(., function(x) mean(x) > 1e-5, TRUE)
+counts <- unclass(otu_table(data_for_lefser))
+colData <- as(sample_data(data_for_lefser), "data.frame")
+summarized_experiment <- SummarizedExperiment(assays = list(counts = counts), colData = colData)
+# relativeAb1 <- function(se, assay = 1L) {
+#     assay_data <- assay(se, i = assay)
+#     csums <- colSums(assay_data)
+#     div <- matrix(rep(csums, each = nrow(assay_data)), ncol = ncol(assay_data))
+#     res <- (assay_data / div)*1e6
+#     assaylist <- assays(se)
+#     newalist <- append(
+#         assaylist, values = S4Vectors::SimpleList(rel_abs = res), after = 0L
+#     )
+#     assays(se) <- newalist
+#     se
+# }
+# summarized_experiment <- relativeAb1(summarized_experiment)
+# assay(summarized_experiment) = assay(summarized_experiment)
+res <- lefser(summarized_experiment, groupCol = "Species")
+```
+
+
+Next, investigate Orbus, Saccharibacter, Holzapfelia, Asaia and other putative symbionts shared with other pollinators. In order to do this, save the ASV table as a fasta file and compare ASVs of interest using Geneious and trees, to evaluate sequence similarity to known insect symbionts and or environmental, related bacteria.
