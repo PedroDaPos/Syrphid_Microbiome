@@ -237,22 +237,25 @@ First, check the abundance of Wolbachia in the samples.
 
 ```{r Wolbachia prevalence across samples}
 # Join the pseq_barplot and metadata_merge
-Wolbachia_barplot <- tax_glom(p_data_taxlean, "Genus") %>% psmelt() %>% 
-  mutate(BacSpec = ifelse(!Genus == "Wolbachia", "Other", "Wolbachia"))
+Wolbachia_boxplot <- tax_glom(p_data_taxlean, "Genus") %>% psmelt() %>% 
+  mutate(BacSpec = ifelse(!Genus == "Wolbachia", "Other", "Wolbachia")) %>%
+  group_by(Sample) %>% mutate(RelAbund = Abundance/sum(Abundance)) %>% ungroup()
 
 # Create the side-by-side bar plots using ggplot2 and facet_wrap
-ggplot(Wolbachia_barplot, aes(x = Sample, y = Abundance, fill = BacSpec)) +
-  geom_bar(stat = "identity", position = "fill", width = 0.9) +
-  facet_wrap(~sample_Species, scale="free") + 
-  labs(title = "Hoverfly microbiome is dominated by Wolbachia",
-       x = "Samples",
-       y = "Relative Frequency") +
+ggplot(Wolbachia_boxplot, aes(x = BacSpec, y = RelAbund, fill = BacSpec)) +
+  geom_boxplot(outlier.shape = NA) + geom_jitter(width = 0.2) +
+  facet_grid(cols = vars(sample_Species), scale="free") + 
+  labs(x = NULL,
+       y = "Relative Abundance",
+       fill = " <b> Bacteria <b> ") +
   theme(legend.position = "top", 
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-panel.background = element_blank()) +
-  labs(fill = "Bacteria Species") +
-  scale_fill_manual(values = c("Wolbachia" = "#009E73", "Other" = "darkgrey"))
+panel.background = element_blank(), strip.text = element_text(face = "italic", size = 14),
+legend.text = element_markdown(size = 14), legend.title = element_markdown()) +
+  labs(fill = "Bacteria") +
+  scale_fill_manual(values = alpha(c("Wolbachia" = "#009E73", "Other" = "white"), .3),
+                    labels = c("Other", "<i>Wolbachia</i>"))
 ggsave("../results/Figures/WolbachiaPrevalence.pdf", width=15, height=10)
 ```
 
@@ -630,7 +633,7 @@ EaNoWolb_unifrac_betadisper_d_05 <- betadisper(EaNoWolb_unifrac_dist_d_05, metad
 anova(EaNoWolb_unifrac_betadisper_d_05)
 ```
 
-All results above show that unweighted Unifrac distances meet the assumption of homogeneity of variance, for all species and for cases were Wolbachia is either present or absent. In this case, however, I am more interested in results using weighted distances than unweighted, since I don't expect microbial communities _within_ a species to have drastically different taxonomical composition, but I would predict that relative abundance of specific bacterial taxa may change according to location. 
+All results above show that unweighted Unifrac distances meet the assumption of homogeneity of variance, for all species and for cases were _Wolbachia_ is either present or absent. In this case, however, I am more interested in results using weighted distances than unweighted, since I don't expect microbial communities _within_ a species to have drastically different taxonomical composition, but I would predict that relative abundance of specific bacterial taxa may change according to location. 
 
 Are microbial communities different between North and South populations of each syrphid species?
 
@@ -650,7 +653,7 @@ ANW_Season_all <- metadata_ANoWolb$Season
 adonis2(formula = ANoWolb_unifrac_distUW ~ ANW_S_W_N + ANW_Season_all, data = metadata_ANoWolb, strata = ANW_Year_all, permutations = 999)
 ```
 
-The results above indicate that, contrary to our hypothesis, differences in the Allograpta's microbiome are not explained by geography (i.e. South versus North populations). In fact, the residuals of these tests seem to indicate that about 95% of variation in microbiome composition is not explained by geography, for either dataset (AWolb and ANoWolb). For Allograpta witht Wolbachia removed, both alpha=1 and alpha=0.5 meet the assumption of homogeneity. Let's test weighted Unifrac distances and use F2-statistic where applicable.
+The results above indicate that, contrary to our hypothesis, differences in the Allograpta's microbiome are not explained by geography (i.e. South versus North populations). In fact, the residuals of these tests seem to indicate that about 95% of variation in microbiome composition is not explained by geography, for either dataset (AWolb and ANoWolb). For Allograpta with Wolbachia removed, both alpha=1 and alpha=0.5 meet the assumption of homogeneity. Let's test weighted Unifrac distances and use F2-statistic where applicable.
 
 ```{r unifrac_alphavariable}
 #Allograpta With wolbachia (alpha 1)
@@ -709,22 +712,22 @@ Extract and prepare dataframe for plotting alpha diversity as a violin plot
 pseq_alpha_meta <- microbiome::meta(pseq_alpha)
 pseq_alpha_meta$Shannon <- tab$shannon
 
-pseq_alpha_plot <- ggviolin(pseq_alpha_meta %>% mutate(Species = factor(Species, levels = c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus"))), x="Species", y="Shannon", add="boxplot", fill="Species")+scale_fill_manual(values = c("Allograpta obliqua" = "#FB9A99", "Eupeodes americanus" = "#E31A1C", "Eupeodes pomus" = "#FDBF6F"))
+pseq_alpha_plot <- ggviolin(pseq_alpha_meta %>% mutate(Species = factor(Species, levels = c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus"))), x="Species", y="Shannon", add="boxplot", fill="Species")+scale_fill_manual(values = c("Allograpta obliqua" = "#FB9A99", "Eupeodes americanus" = "#E31A1C", "Eupeodes pomus" = "#FDBF6F"), labels = c("<i>Allograpta obliqua</i>","<i>Eupeodes americanus</i>" ,"<i>Eupeodes pomus</i>"))
 
-p1 <- pseq_alpha_plot+ labs(
-  x = "Species",
-  y = "Shannon index",
-  title = "Microbiome Alpha Diversity in Hoverflies"
+p1 <- pseq_alpha_plot+ labs( fill = "<b> Species </b>",
+  y = "Shannon index"
 ) +
   theme(
-    axis.title.x = element_markdown(),
-    axis.title.y = element_markdown()
-  )
+    axis.title.x = element_blank(),
+    axis.text.x.bottom = element_blank(),
+    axis.title.y = element_markdown(), 
+    legend.text = element_markdown(size = 14),
+    legend.title = element_markdown(size = 14))
 ggpar(p1, ylim = c(0, 3))
 ```
 
 ```{r save-alpha-diversity-plot, eval=FALSE}
-ggsave("../results/Figures/Feb_AlphaDiversity.pdf", width=15, height=10)
+ggsave("../results/Figures/March_AlphaDiversity.pdf", width=15, height=10)
 ```
 
 
@@ -740,26 +743,220 @@ Extract and prepare dataframe for plotting alpha diversity as a violin plot
 pseq_alpha_meta <- microbiome::meta(pseq_alpha)
 pseq_alpha_meta$Shannon <- tab$shannon
 
-pseq_alpha_plot <- ggviolin(pseq_alpha_meta %>% mutate(Species = factor(Species, levels = c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus"))), x="Species", y="Shannon", add="boxplot", fill="Species")+scale_fill_manual(values = c("Allograpta obliqua" = "#FB9A99", "Eupeodes americanus" = "#E31A1C", "Eupeodes pomus" = "#FDBF6F"))
+pseq_alpha_plot <- ggviolin(pseq_alpha_meta %>% mutate(Species = factor(Species, levels = c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus"))), x="Species", y="Shannon", add="boxplot", fill="Species")+scale_fill_manual(values = c("Allograpta obliqua" = "#FB9A99", "Eupeodes americanus" = "#E31A1C", "Eupeodes pomus" = "#FDBF6F"), labels = c("<i>Allograpta obliqua</i>","<i>Eupeodes americanus</i>" ,"<i>Eupeodes pomus</i>"))
 
-p1 <- pseq_alpha_plot+ labs(
-  x = "Species",
-  y = "Shannon index",
-  title = "Microbiome Alpha Diversity in Hoverflies"
+p1 <- pseq_alpha_plot+ labs( fill = "<b> Species </b>",
+  y = "Shannon index"
 ) +
   theme(
-    axis.title.x = element_markdown(),
-    axis.title.y = element_markdown()
-  )
+    axis.title.x = element_blank(),
+    axis.text.x.bottom = element_blank(),
+    axis.title.y = element_markdown(), 
+    legend.text = element_markdown(size = 14),
+    legend.title = element_markdown(size = 14))
 ggpar(p1, ylim = c(0, 3))
 ```
 
 ```{r save-alpha-diversity-plot, eval=FALSE}
-ggsave("../results/Figures/Feb_AlphaDiversity_no_Wolbachia.pdf", width=15, height=10)
+ggsave("../results/Figures/March_AlphaDiversity_no_Wolbachia.pdf", width=15, height=10)
 ```
 
 
+Diversity barplot
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r barplot-diversity-genus}
+
+library(cowplot)
+library(grid)
+
+process_phyloseq <- function(p_data) {
+  # Step 1: Simplify the dataset
+  p_data.clean <- p_data %>% 
+    psmelt()
+
+  # Step 2: Replace NA in "Species" column
+  filtered_no_NA <- p_data.clean %>% 
+    mutate(Genus = ifelse(is.na(Genus) & !is.na(Family), paste0(Family, " spp."),
+                    ifelse(is.na(Genus) & !is.na(Order), paste0(Order, " spp."),
+                    ifelse(is.na(Genus) & !is.na(Class), paste0(Class, " spp."),
+                    ifelse(is.na(Genus) & !is.na(Phylum), paste0(Phylum, " spp."),
+                    ifelse(is.na(Genus) & !is.na(Kingdom), paste0(Kingdom, " spp."), Genus))))))
+
+  # Step 3: Initialize result containers
+  region_plots <- list()
+  all_genus <- list()
+
+  # Step 4: Create color palette
+  combined_genus <- unique(filtered_no_NA$Genus)
+  color_palette <- RColorBrewer::brewer.pal(n= min(8, length(combined_genus)), name = "Dark2")
+  if(length(combined_genus) > 8) {
+    color_palette <- colorRampPalette(color_palette)(length(combined_genus))
+  }
+  combined_genus[length(combined_genus)+1] <- "Other"
+  color_palette[length(color_palette)+1] <- "lightgray"
+  names(color_palette) <- combined_genus
+
+
+  # Step 5: Define species to process
+  species_list <- c("Allograpta obliqua", "Eupeodes americanus", "Eupeodes pomus")
+
+  for (species in species_list) {
+    species_data <- filtered_no_NA %>% filter(sample_Species == species)
+
+    # Step 5.1: Select relevant columns and sum Abundance by unique combinations
+    species_simple <- species_data %>% 
+      select(Sample, Abundance, S_W_N, Genus) %>% 
+      group_by(Sample, S_W_N, Genus) %>% 
+      summarize(Abundance = sum(Abundance), .groups = "drop")
+
+    # Step 5.2: Process data for each "S_W_N"
+    for (geography in unique(species_simple$S_W_N)) {
+      swn_data <- species_simple %>% filter(S_W_N == geography)
+      swn_data <- swn_data %>% group_by(Sample) %>%
+      mutate(Abundance = ifelse(!Abundance == "0", Abundance/sum(Abundance), Abundance)) %>%
+      ungroup()
+      
+    # Step 5.3: Find the 20 most abundant "Genus" and rename others as "Other"
+      sort.Genus <- swn_data %>% 
+        count(Genus, wt = Abundance) %>%
+        arrange(n) %>%
+        mutate(relativeAb = n/sum(n)) %>%
+        mutate(cumRelAb = cumsum(relativeAb)) %>%
+        filter(cumRelAb >= 0.3) %>%
+        pull(Genus)
+      
+      sort.Genus <- unique(sort.Genus)
+
+      swn_data <- swn_data %>% 
+        mutate(Genus = ifelse(Genus %in% sort.Genus, Genus, "Other")) %>% group_by(Sample, S_W_N, Genus) %>% 
+      summarize(Abundance = sum(Abundance), .groups = "drop")
+
+
+    # Step 5.4: Sum Abundance and sort Genus
+      sort.Genus <- swn_data %>% 
+        count(Genus, wt = Abundance) %>% 
+        arrange(desc(n)) %>% 
+        pull(Genus)
+
+    # Step 5.5: Get Sample order
+      Sample.order <- swn_data %>% 
+        filter(Genus == sort.Genus[1]) %>% 
+        arrange(desc(Abundance)) %>% 
+        pull(Sample)
+
+    # Step 5.6: Factor Sample/Genus and save month-specific object
+      swn_data <- swn_data %>% 
+        mutate(Sample = factor(Sample, levels = Sample.order)) %>% 
+        mutate(Genus = factor(Genus, levels = rev(sort.Genus)))
+
+      all_genus[[paste(species, geography, sep = "_")]] <- unique(swn_data$Genus)
+
+    # Step 6: Create ggplot stacked barplot
+      swn_plot <- swn_data %>% 
+        ggplot(aes(x = Sample, y = Abundance, fill = Genus)) + 
+        geom_bar(stat = "identity", width = 1) + 
+        theme_classic() + 
+        theme(axis.text.x = element_blank(),
+              axis.title.x = element_blank(),
+              axis.text.y = element_blank(),
+              axis.title.y = element_blank(),
+              axis.ticks.x = element_blank(),
+              axis.ticks.y = element_blank(),
+              axis.line = element_blank(),
+              legend.position = "none") + 
+        labs(title = geography) + 
+        theme(plot.title = element_text(hjust = 0.5)) +
+        scale_fill_manual(values=color_palette)
+
+      region_plots[[paste(species, geography, sep = "_")]] <- swn_plot
+    }
+  }
+
+
+  # Step 7: Combine ggplots with cowplot (this isn't perfect, but can be improved in Inkscape)
+  species_plots <- list()
+
+  for (species in species_list) {
+    regions <- sort(unique(filtered_no_NA %>% filter(sample_Species == species) %>% pull(S_W_N)))
+    regions_plot_list <- lapply(regions, function(geography) region_plots[[paste(species, geography, sep = "_")]])
+    species_title <- case_when(species == "Allograpta obliqua" ~ "Allograpta obliqua", 
+                               species == "Eupeodes americanus" ~ "Eupeodes americanus",
+                               species == "Eupeodes pomus" ~ "Eupeodes pomus")
+    species_plots[[species]] <- cowplot::plot_grid(
+      plotlist = regions_plot_list, 
+      ncol = length(regions) 
+    )
+  }
+
+  # final_plot <- cowplot::plot_grid(species_plots[["Allograpta obliqua"]], species_plots[["Eupeodes americanus"]], species_plots[["Eupeodes pomus"]], nrow = 3, rel_heights = c(1.2, 1, 1))
+  # final_plot
+  #ggsave("./Figures/top70percentAbundanceGenus.pdf", width = 15, height = 10)
+
+  
+  # Extra step: make a legend plot that unifies taxa from all months/species data. This plot can be manually added using Inkscape
+  # legend_plot <- ggplot(data.frame(Genus = names(color_palette)[names(color_palette) %in% unlist(all_genus)], Value = 1), aes(x = Genus, y = Value, fill = Genus)) + geom_col() +
+  # scale_fill_manual(values = color_palette) +
+  # theme_void() +
+  # theme(legend.position = "bottom") +
+  # guides(fill = guide_legend(nrow = 2))
+  # 
+  # legend <- get_legend(legend_plot)
+  # grid.newpage()
+  # pdf("./Figures/legend_top70percentAbundanceGenus.pdf", width=20, height=20)
+  # grid.draw(legend)
+  # dev.off()
+
+  #return(list(final_plot = final_plot, species_plots = species_plots, color_palette = color_palette))
+  return(list(species_plots = species_plots))
+}
+q <- process_phyloseq(Wolb_rr_up)
+```
 
 
 
