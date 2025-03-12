@@ -765,7 +765,174 @@ ggsave("../results/Figures/March_AlphaDiversity_no_Wolbachia.pdf", width=15, hei
 Diversity barplot
 
 
+PCoA plots
 
+```{r pcoa}
+# PCoA with density curves on the x and y-axes
+## Allograpta with No Wolbachia, wunifrac
+unifrac_dist <- ANoWolb_unifrac_dist_d_1
+ps_object <- Allograpta_NowolbNS
+pcoa <- cmdscale(as.matrix(unifrac_dist), eig = TRUE, k = 2)
+scores <- as.data.frame(pcoa$points)
+colnames(scores) <- c("MDS1", "MDS2")
+
+# Add metadata
+metadata <- data.frame(sample_data(ps_object))
+metadata$MigratoryStatus <- factor(metadata$MigratoryStatus, levels = c("No", "Yes", "Unknown"))
+plot_data <- cbind(scores, metadata)
+
+# Create variance variable for the plot axis labels
+var_explained <- round(100 * pcoa$eig / sum(pcoa$eig), 2)
+
+# Generate figure (PCoA and boxplots along both axis)
+p1 <- ggplot(plot_data, aes(x = MDS1, y = MDS2, color = S_W_N, shape = MigratoryStatus)) +
+  geom_point(size = 8, alpha = 0.5) +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    x = paste0("MDS1 (", var_explained[1], "%)"),
+    y = paste0("MDS2 (", var_explained[2], "%)"),
+    color = "Population",
+    shape = "Migratory?",
+    title = "<i>Allograpta</i>, Weighted Unifrac",
+    caption = "<i>F<sub>2</sub></i>=3.001, df=1,29, p-value=<b>0.001</b>"
+  ) +
+  theme_minimal() + theme(legend.text = element_text(size = 14), legend.title = element_text(size = 14), plot.title = element_markdown(), 
+                          plot.caption = element_markdown()) +
+  scale_shape_manual(values= 15:17) +
+  ggside::geom_xsideboxplot(aes(fill = S_W_N, y = S_W_N, group = S_W_N), orientation = "y", show.legend = FALSE) +
+  ggside::geom_ysideboxplot(aes(fill = S_W_N, x = S_W_N, group = S_W_N), orientation = "x", show.legend = FALSE) +
+  ggside::scale_xsidey_discrete(labels = NULL) +
+  ggside::scale_ysidex_discrete(labels = NULL) +
+  ggside::theme_ggside_void()+
+  scale_fill_brewer(palette = "Set2")
+
+
+#Allograpta with no Wolbachia, unweighted unifrac
+
+unifrac_dist <- ANoWolb_unifrac_distUW
+ps_object <- Allograpta_NowolbNS
+pcoa <- cmdscale(as.matrix(unifrac_dist), eig = TRUE, k = 2)
+scores <- as.data.frame(pcoa$points)
+colnames(scores) <- c("MDS1", "MDS2")
+
+# Add metadata
+metadata <- data.frame(sample_data(ps_object))
+metadata$MigratoryStatus <- factor(metadata$MigratoryStatus, levels = c("No", "Yes", "Unknown"))
+plot_data <- cbind(scores, metadata)
+
+# Create variance variable for the plot axis labels
+var_explained <- round(100 * pcoa$eig / sum(pcoa$eig), 2)
+
+# Generate figure (PCoA and boxplots along both axis)
+p2 <- ggplot(plot_data, aes(x = MDS1, y = MDS2, color = S_W_N, shape = MigratoryStatus)) +
+  geom_point(size = 8, alpha = 0.5) +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    x = paste0("MDS1 (", var_explained[1], "%)"),
+    y = paste0("MDS2 (", var_explained[2], "%)"),
+    color = "Population",
+    shape = "Migratory?",
+    title = "<i>Allograpta</i>, Unweighted Unifrac",
+    caption = "<i>F</i>=0.995, df=1,29, p-value=0.507"
+  ) +
+  theme_minimal() + theme(legend.text = element_text(size = 14), legend.title = element_text(size = 14), plot.title = element_markdown(), 
+                          plot.caption = element_markdown()) +
+  scale_shape_manual(values= 15:17) +
+  ggside::geom_xsideboxplot(aes(fill = S_W_N, y = S_W_N, group = S_W_N), orientation = "y", show.legend = FALSE) +
+  ggside::geom_ysideboxplot(aes(fill = S_W_N, x = S_W_N, group = S_W_N), orientation = "x", show.legend = FALSE) +
+  ggside::scale_xsidey_discrete(labels = NULL) +
+  ggside::scale_ysidex_discrete(labels = NULL) +
+  ggside::theme_ggside_void()+
+  scale_fill_brewer(palette = "Set2")
+
+## Eupeodes with No Wolbachia, wunifrac
+unifrac_dist <- EaNoWolb_unifrac_dist_d_1
+ps_object <- Eupeodes_Nowolb
+pcoa <- cmdscale(as.matrix(unifrac_dist), eig = TRUE, k = 2)
+scores <- as.data.frame(pcoa$points)
+colnames(scores) <- c("MDS1", "MDS2")
+
+# Add metadata
+metadata <- data.frame(sample_data(ps_object))
+metadata$MigratoryStatus <- factor(metadata$MigratoryStatus, levels = c("No", "Yes", "Unknown"))
+plot_data <- cbind(scores, metadata)
+
+# Create variance variable for the plot axis labels
+var_explained <- round(100 * pcoa$eig / sum(pcoa$eig), 2)
+
+# Generate figure (PCoA and boxplots along both axis)
+p3 <- ggplot(plot_data, aes(x = MDS1, y = MDS2, color = S_W_N, shape = MigratoryStatus)) +
+  geom_point(size = 8, alpha = 0.5) +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    x = paste0("MDS1 (", var_explained[1], "%)"),
+    y = paste0("MDS2 (", var_explained[2], "%)"),
+    color = "Population",
+    shape = "Migratory?",
+    title = "<i>Eupeodes</i>, Weighted Unifrac",
+    caption = "<i>F</i>=0.0464, df=1,45, p-value=0.720"
+  ) +
+  theme_minimal() + theme(legend.text = element_text(size = 14), legend.title = element_text(size = 14), plot.title = element_markdown(), 
+                          plot.caption = element_markdown()) +
+  scale_shape_manual(values= 15:17) +
+  ggside::geom_xsideboxplot(aes(fill = S_W_N, y = S_W_N, group = S_W_N), orientation = "y", show.legend = FALSE) +
+  ggside::geom_ysideboxplot(aes(fill = S_W_N, x = S_W_N, group = S_W_N), orientation = "x", show.legend = FALSE) +
+  ggside::scale_xsidey_discrete(labels = NULL) +
+  ggside::scale_ysidex_discrete(labels = NULL) +
+  ggside::theme_ggside_void()+
+  scale_fill_brewer(palette = "Set2")
+
+#Euepeodes with no Wolbachia, unweighted unifrac
+
+unifrac_dist <- EaNoWolb_unifrac_distUW
+ps_object <- Eupeodes_Nowolb
+pcoa <- cmdscale(as.matrix(unifrac_dist), eig = TRUE, k = 2)
+scores <- as.data.frame(pcoa$points)
+colnames(scores) <- c("MDS1", "MDS2")
+
+# Add metadata
+metadata <- data.frame(sample_data(ps_object))
+metadata$MigratoryStatus <- factor(metadata$MigratoryStatus, levels = c("No", "Yes", "Unknown"))
+plot_data <- cbind(scores, metadata)
+
+# Create variance variable for the plot axis labels
+var_explained <- round(100 * pcoa$eig / sum(pcoa$eig), 2)
+
+# Generate figure (PCoA and boxplots along both axis)
+p4 <- ggplot(plot_data, aes(x = MDS1, y = MDS2, color = S_W_N, shape = MigratoryStatus)) +
+  geom_point(size = 8, alpha = 0.5) +
+  scale_color_brewer(palette = "Set2") +
+  labs(
+    x = paste0("MDS1 (", var_explained[1], "%)"),
+    y = paste0("MDS2 (", var_explained[2], "%)"),
+    color = "Population",
+    shape = "Migratory?",
+    title = "<i>Eupeodes</i>, Unweighted Unifrac",
+    caption = "<i>F</i>=0.695, df=1,45, p-value=0.803"
+  ) +
+  theme_minimal() + theme(legend.text = element_text(size = 14), legend.title = element_text(size = 14), plot.title = element_markdown(), 
+                          plot.caption = element_markdown()) +
+  scale_shape_manual(values= 15:17) +
+  ggside::geom_xsideboxplot(aes(fill = S_W_N, y = S_W_N, group = S_W_N), orientation = "y", show.legend = FALSE) +
+  ggside::geom_ysideboxplot(aes(fill = S_W_N, x = S_W_N, group = S_W_N), orientation = "x", show.legend = FALSE) +
+  ggside::scale_xsidey_discrete(labels = NULL) +
+  ggside::scale_ysidex_discrete(labels = NULL) +
+  ggside::theme_ggside_void()+
+  scale_fill_brewer(palette = "Set2")
+
+p5 <- plot_grid(p1 + theme(legend.position="none"),
+          p3 + theme(legend.position="none"),
+          p2 + theme(legend.position="none"), 
+          p4 + theme(legend.position="none"), labels = c("A", "C", "B", "D"), ncol = 2, nrows = 2)
+
+# extract the legend from one of the plots
+legend <- get_legend(
+  # create some space to the left of the legend
+  p1 + theme(legend.box.margin = margin(0, 1, 1, 12))
+)
+
+plot_grid(p5, legend, rel_widths = c(6, 2))
+```
 
 
 
