@@ -923,21 +923,63 @@ p4 <- ggplot(plot_data, aes(x = MDS1, y = MDS2, color = S_W_N, shape = Migratory
 p5 <- plot_grid(p1 + theme(legend.position="none"),
           p3 + theme(legend.position="none"),
           p2 + theme(legend.position="none"), 
-          p4 + theme(legend.position="none"), labels = c("A", "C", "B", "D"), ncol = 2, nrows = 2)
+          p4 + theme(legend.position="none"), labels = c("A", "C", "B", "D"), ncol = 2, nrows = 1, align = "hv", rel_widths = c(1,1), rel_heights = c(1,1),
+          panel_spacing = unit(0, "cm"))
 
 # extract the legend from one of the plots
 legend <- get_legend(
   # create some space to the left of the legend
-  p1 + theme(legend.box.margin = margin(0, 1, 1, 12))
+  p1 + theme(legend.box.margin = margin(0, 0, 0, 12))
 )
 
-plot_grid(p5, legend, rel_widths = c(6, 2))
+plot_grid(p5, legend, rel_widths = c(6, 1))
+ggsave("../results/Figures/PCoA.pdf", height = 12, width = 18)
 ```
 
 
 
+Barplot via older method (needs revision)
+pseq_alpha <-aggregate_taxa(Wolb_rr_up, level = "Genus")
+# 1. Transform phyloseq object into a data frame
+pseq_barplot <- pseq_alpha %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
+        select(ASV, Kingdom, Phylum, Class, Order, Family, Genus, Sample, Abundance) %>% spread(Sample, Abundance)
+
+# 2. Taxa are rows. Create a column for summing all reads per taxa, and order taxa so that the most abundant taxa is listed first, then the second, third, etc. Next, create a column with the cumulative sums (i.e. row 1a = row1, row2a = row1 + row2, row3a = row1 + row2 + row3)
+
+pseq_barplot$abundance_sum <- rowSums(pseq_barplot[8:146])
+pseq_barplot <- pseq_barplot[order(-pseq_barplot$abundance_sum),]
+pseq_barplot <- pseq_barplot %>% mutate(cumulative_sums = cumsum(abundance_sum))
+
+# 3. Determine the threshold where cumulative abundance reaches 95%
+threshold <- sum(pseq_barplot$abundance_sum) * 0.95
+
+# 4. Create a new taxonomy table with the updated Genus information
+pseq_barplot$Genus <- ifelse(pseq_barplot$cumulative_sums >= threshold, "other", pseq_barplot$Genus)
 
 
+# Join the pseq_barplot and metadata
+metadata <- data.frame(sample_data(Wolb_rr_up))
+data_combined <- pseq_barplot[7:146] %>%
+  gather(sample, count, -Genus) %>%
+  dplyr::left_join(metadata, by = c("sample" = "old_ID"))
+
+# For plotting purposes, inspect number of taxa present and order to be presented
+unique(data_combined$Genus)
+data_combined$Genus <- factor(data_combined$Genus, levels = c("Wolbachia", "Holzapfelia", "Gilliamella", "Unknown", "other"))
+
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(data_combined, aes(x = sample, y = count, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  facet_grid(cols = vars(Species), scale="free") + 
+  labs(x = "Samples",
+       y = "Relative Frequency") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(),
+strip.text = element_text(face = "italic", size = 14), legend.text = element_markdown(size = 14), legend.title = element_markdown(size = 14)) +
+  scale_fill_manual(values = c("Wolbachia" = "#009E73", "Holzapfelia" = "black", "Gilliamella" = "#CC79A7", "Unknown" = "lightgrey", "other" = "darkgrey"),
+  labels = c("<i>Wolbachia</i>","<i>Holzapfelia</i>","<i>Gilliamella</i>","Unknown","Other"))  # Customize fill colors
 
 
 
@@ -1032,10 +1074,11 @@ process_phyloseq <- function(p_data) {
     # Step 5.3: Find the 20 most abundant "Genus" and rename others as "Other"
       sort.Genus <- swn_data %>% 
         count(Genus, wt = Abundance) %>%
-        arrange(n) %>%
+        arrange(desc(n)) %>%
         mutate(relativeAb = n/sum(n)) %>%
         mutate(cumRelAb = cumsum(relativeAb)) %>%
-        filter(cumRelAb >= 0.3) %>%
+        # filter(cumRelAb >= 0.3) %>%
+        slice(1:10) %>%
         pull(Genus)
       
       sort.Genus <- unique(sort.Genus)
@@ -1057,7 +1100,7 @@ process_phyloseq <- function(p_data) {
         arrange(desc(Abundance)) %>% 
         pull(Sample)
 
-    # Step 5.6: Factor Sample/Genus and save month-specific object
+    # Step 5.6: Factor Sample/Genus and save geography-specific object
       swn_data <- swn_data %>% 
         mutate(Sample = factor(Sample, levels = Sample.order)) %>% 
         mutate(Genus = factor(Genus, levels = rev(sort.Genus)))
