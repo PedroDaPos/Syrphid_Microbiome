@@ -937,9 +937,10 @@ ggsave("../results/Figures/PCoA.pdf", height = 12, width = 18)
 ```
 
 
-
-Barplot via older method (needs revision)
+```{r barplotMicrobiomeWolb}
+#Barplot via older method (needs revision)
 pseq_alpha <-aggregate_taxa(Wolb_rr_up, level = "Genus")
+
 # 1. Transform phyloseq object into a data frame
 pseq_barplot <- pseq_alpha %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
         select(ASV, Kingdom, Phylum, Class, Order, Family, Genus, Sample, Abundance) %>% spread(Sample, Abundance)
@@ -980,18 +981,79 @@ panel.background = element_blank(),
 strip.text = element_text(face = "italic", size = 14), legend.text = element_markdown(size = 14), legend.title = element_markdown(size = 14)) +
   scale_fill_manual(values = c("Wolbachia" = "#009E73", "Holzapfelia" = "black", "Gilliamella" = "#CC79A7", "Unknown" = "lightgrey", "other" = "darkgrey"),
   labels = c("<i>Wolbachia</i>","<i>Holzapfelia</i>","<i>Gilliamella</i>","Unknown","Other"))  # Customize fill colors
+```
+
+```{r savebarplot-wolb}
+ggsave("../results/Figures/Wolb_barplot.pdf", width=15, height=10)
+```
 
 
+```{r barplotMicrobiomeNoWolb}
+#Barplot via older method (needs revision)
+pseq_alpha <-aggregate_taxa(NoWolb_rr_up, level = "Family")
+
+# 1. Transform phyloseq object into a data frame
+pseq_barplot <- pseq_alpha %>% psmelt() %>% arrange(OTU) %>% rename(ASV = OTU) %>%
+        select(ASV, Kingdom, Phylum, Class, Order, Family, Sample, Abundance) %>% spread(Sample, Abundance)
+
+# 1.1 It seems like taxonomical ranks identical at the Family level were not merged (or aggregated) because higher rank identification are different (e.g. Lactobacillaceae is identified as belonging to the phylum Proteobacteria, but other times to the phylym Pseudomonadota). This may have been caused by using Blast identification to improve taxonomy. To fix this, I will manually aggregate these instances.
+
+pseq_barplot <- pseq_barplot[,-c(1:5)] %>% group_by(Family) %>% summarise_all(sum) %>% as.data.frame()
+
+# 2. Taxa are rows. Create a column for summing all reads per taxa, and order taxa so that the most abundant taxa is listed first, then the second, third, etc. Next, create a column with the cumulative sums (i.e. row 1a = row1, row2a = row1 + row2, row3a = row1 + row2 + row3)
+
+pseq_barplot$abundance_sum <- rowSums(pseq_barplot[7:84])
+pseq_barplot <- pseq_barplot[order(-pseq_barplot$abundance_sum),]
+pseq_barplot <- pseq_barplot %>% mutate(cumulative_sums = cumsum(abundance_sum))
+
+# 3. Determine the threshold where cumulative abundance reaches 95%
+threshold <- sum(pseq_barplot$abundance_sum) * 0.95
+
+# 4. Create a new taxonomy table with the updated Genus information
+pseq_barplot$Family <- ifelse(pseq_barplot$cumulative_sums >= threshold, "other", pseq_barplot$Family)
 
 
+# Join the pseq_barplot and metadata
+metadata <- data.frame(sample_data(NoWolb_rr_up))
+data_combined <- pseq_barplot[1:84] %>%
+  gather(sample, count, -Family) %>%
+  dplyr::left_join(metadata, by = c("sample" = "old_ID"))
+
+# For plotting purposes, inspect number of taxa present and order to be presented
+unique(data_combined$Family)
+
+#Based on the ggplot plot (below) I redefined the order of the samples
+data_combined$Family <- factor(data_combined$Family, levels = c("Lactobacillaceae", "Acetobacteraceae", "Orbaceae", "Erwiniaceae","Yersiniaceae","Enterococcaceae","Hafniaceae","Moraxellaceae", "Morganellaceae","Weeksellaceae","Xanthomonadaceae","Enterobacteriaceae","Other"))
+
+# Create the side-by-side bar plots using ggplot2 and facet_wrap
+ggplot(data_combined, aes(x = sample, y = count, fill = Family)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.9) +
+  facet_grid(cols = vars(Species), scale="free") + 
+  labs(x = "Samples",
+       y = "Relative Frequency") +
+  theme(legend.position = "top", 
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(),
+strip.text = element_text(face = "italic", size = 14), legend.text = element_markdown(size = 14), legend.title = element_markdown(size = 14)) + scale_fill_manual(values = c("Lactobacillaceae" = "#FFCC00", "Acetobacteraceae" = "#CC3300", "Orbaceae" = "#CC3399", "Erwiniaceae" = "#CC66FF", "Yersiniaceae" = "#003300", "Enterococcaceae" = "#CCFFFF", "Hafniaceae" = "#336666", "Moraxellaceae" = "#663300", "Morganellaceae" = "#CCCC66", "Weeksellaceae" = "#669933", "Xanthomonadaceae" = "#FF3399", "Enterobacteriaceae" = "#FF9933", "other" = "darkgrey"), labels = c("Lactobacillaceae", "Acetobacteraceae", "Orbaceae", "Erwiniaceae","Yersiniaceae","Enterococcaceae","Hafniaceae","Moraxellaceae", "Morganellaceae","Weeksellaceae","Xanthomonadaceae","Enterobacteriaceae","Other"))  # Customize fill colors
+```
 
 
+```{r savebarplot-nowolb}
+ggsave("../results/Figures/NoWolb_barplot.pdf", width=15, height=10)
+```
+
+# Phylogeny of pollinator-associated phyla present in the syrphid species _A._ _obliqua_ and _E._ _americanus_
+
+Steps:
+1. Pick taxa based on a general phylogeny
+2. Determine relative abundance
+3. Make family-specific trees? 
 
 
+```{r pollinator_phylogeny_extract_taxa}
 
-
-
-
+```
 
 
 
