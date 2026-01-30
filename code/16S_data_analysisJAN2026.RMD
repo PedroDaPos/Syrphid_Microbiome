@@ -542,40 +542,42 @@ Let's check if Bray-Curtis distances can be used to test geography, while respec
 ```{r species-data-betadisper}
 #Wolb
 ## Allograpta
-Allograpta_wolbNS <- Allograpta_wolb %>% subset_samples(S_W_N != "West") # <- exclude a few "West" samples, so we can compare only North and South samples
+Allograpta_wolbNS <- Allograpta_wolb %>% subset_samples(S_W_N != "West") %>% subset_samples(Season == "Fall") # <- exclude a few "West" samples, so we can compare only North and South samples; exclude Spring samples as well, so we compare only Fall samples with each other
 Allograpta_wolbNS <- prune_taxa(taxa_sums(Allograpta_wolbNS) > 0, Allograpta_wolbNS) # <- exclude taxa that has zero counts across samples, possibly because of subsetting data
 otu_table <- t(as(otu_table(Allograpta_wolbNS), "matrix"))
 AWolb_bray_dist <- vegdist(otu_table, method = "bray")
 metadata_AWolb <- data.frame(sample_data(Allograpta_wolbNS))
 disper_NS_AWolb <- betadisper(AWolb_bray_dist, metadata_AWolb$S_W_N)
-anova(disper_NS_AWolb) # p-value < 0.0016; data is over dispersed
+anova(disper_NS_AWolb) # p-value < 0.0002187; data is over dispersed
 ## Eupeodes
+Eupeodes_wolb <- Eupeodes_wolb %>% subset_samples(Season == "Fall")
 Eupeodes_wolb <- prune_taxa(taxa_sums(Eupeodes_wolb) > 0, Eupeodes_wolb) # <- exclude taxa that has zero counts across samples, possibly because of subsetting data
 otu_table <- t(as(otu_table(Eupeodes_wolb), "matrix"))
 EaWolb_bray_dist <- vegdist(otu_table, method = "bray")
 metadata_EaWolb <- data.frame(sample_data(Eupeodes_wolb))
 disper_NS_EaWolb <- betadisper(EaWolb_bray_dist, metadata_EaWolb$S_W_N)
-anova(disper_NS_EaWolb) # p-value = 0.8578; data is not over dispersed
+anova(disper_NS_EaWolb) # p-value = 0.9665; data is not over dispersed
 
 #NoWolb
 ## Allograpta
-Allograpta_NowolbNS <- Allograpta_Nowolb %>% subset_samples(S_W_N != "West") # <- exclude a few "West" samples, so we can compare only North and South samples
+Allograpta_NowolbNS <- Allograpta_Nowolb %>% subset_samples(S_W_N != "West") %>% subset_samples(Season == "Fall") # <- exclude a few "West" samples, so we can compare only North and South samples
 Allograpta_NowolbNS <- prune_taxa(taxa_sums(Allograpta_NowolbNS) > 0, Allograpta_NowolbNS) # <- exclude taxa that has zero counts across samples, possibly because of subsetting data
 otu_table <- t(as(otu_table(Allograpta_NowolbNS), "matrix"))
 ANoWolb_bray_dist <- vegdist(otu_table, method = "bray")
 metadata_ANoWolb <- data.frame(sample_data(Allograpta_NowolbNS))
 disper_NS_ANoWolb <- betadisper(ANoWolb_bray_dist, metadata_ANoWolb$S_W_N)
-anova(disper_NS_ANoWolb) # p-value = 0.1301; data is not over dispersed
+anova(disper_NS_ANoWolb) # p-value = 0.05404; data is over dispersed
 ## Eupeodes
+Eupeodes_Nowolb <- Eupeodes_Nowolb %>% subset_samples(Season == "Fall")
 Eupeodes_Nowolb <- prune_taxa(taxa_sums(Eupeodes_Nowolb) > 0, Eupeodes_Nowolb) # <- exclude taxa that has zero counts across samples, possibly because of subsetting data
 otu_table <- t(as(otu_table(Eupeodes_Nowolb), "matrix"))
 EaNoWolb_bray_dist <- vegdist(otu_table, method = "bray")
 metadata_EaNoWolb <- data.frame(sample_data(Eupeodes_Nowolb))
 disper_NS_EaNoWolb <- betadisper(EaNoWolb_bray_dist, metadata_EaNoWolb$S_W_N)
-anova(disper_NS_EaNoWolb) # p-value = 0.4914; data is not over dispersed
+anova(disper_NS_EaNoWolb) # p-value = 0.4186; data is not over dispersed
 ```
 
-Almost every case meets Permanova's assumption of homogeneity of variance, except one. Like earlier, I will test all Unifrac distances next and for cases where data is still overdispersed, then I will use the modified, F2-statistic.  
+Half of the cases meets Permanova's assumption of homogeneity of variance. Like earlier, I will test all Unifrac distances next and for cases where data is still overdispersed, then I will use the modified, F2-statistic.  
 
 >Note: by prunning taxa (see previous code chunk), the phylogenetic tree of each data subset is also trimmed eliminating taxa excluded by subsetting the dataset.
 
@@ -586,11 +588,11 @@ AWolb_unifrac_distUW <- as.dist(unifracs[, , "d_UW"])
 AWolb_unifrac_dist_d_1 <- as.dist(unifracs[, , "d_1"])
 AWolb_unifrac_dist_d_05 <- as.dist(unifracs[, , "d_0.5"])
 AWolb_unifrac_betadisperUW <- betadisper(AWolb_unifrac_distUW, metadata_AWolb$S_W_N) 
-anova(AWolb_unifrac_betadisperUW)
+anova(AWolb_unifrac_betadisperUW) # UW unifrac p = 0.2295
 AWolb_unifrac_betadisper_d_1 <- betadisper(AWolb_unifrac_dist_d_1, metadata_AWolb$S_W_N) 
-anova(AWolb_unifrac_betadisper_d_1)
+anova(AWolb_unifrac_betadisper_d_1) # D_1 unifrac p = 0.0003928
 AWolb_unifrac_betadisper_d_05 <- betadisper(AWolb_unifrac_dist_d_05, metadata_AWolb$S_W_N) 
-anova(AWolb_unifrac_betadisper_d_05)
+anova(AWolb_unifrac_betadisper_d_05) # D_05 unifrac p = 0.0002051
 
 # Wolb Eupeodes
 unifracs = GUniFrac::GUniFrac(t(as(otu_table(Eupeodes_wolb), "matrix")), phy_tree(Eupeodes_wolb), alpha = c(0, 0.5, 1))$unifracs
@@ -598,11 +600,11 @@ EaWolb_unifrac_distUW <- as.dist(unifracs[, , "d_UW"])
 EaWolb_unifrac_dist_d_1 <- as.dist(unifracs[, , "d_1"])
 EaWolb_unifrac_dist_d_05 <- as.dist(unifracs[, , "d_0.5"])
 EaWolb_unifrac_betadisperUW <- betadisper(EaWolb_unifrac_distUW, metadata_EaWolb$S_W_N) 
-anova(EaWolb_unifrac_betadisperUW)
+anova(EaWolb_unifrac_betadisperUW) # p = 0.3084
 EaWolb_unifrac_betadisper_d_1 <- betadisper(EaWolb_unifrac_dist_d_1, metadata_EaWolb$S_W_N) 
-anova(EaWolb_unifrac_betadisper_d_1)
+anova(EaWolb_unifrac_betadisper_d_1) # p = 0.9558
 EaWolb_unifrac_betadisper_d_05 <- betadisper(EaWolb_unifrac_dist_d_05, metadata_EaWolb$S_W_N) 
-anova(EaWolb_unifrac_betadisper_d_05)
+anova(EaWolb_unifrac_betadisper_d_05) # p = 0.8815
 
 # No Wolb Allograpta
 unifracs = GUniFrac::GUniFrac(t(as(otu_table(Allograpta_NowolbNS), "matrix")), phy_tree(Allograpta_NowolbNS), alpha = c(0, 0.5, 1))$unifracs
@@ -610,11 +612,11 @@ ANoWolb_unifrac_distUW <- as.dist(unifracs[, , "d_UW"])
 ANoWolb_unifrac_dist_d_1 <- as.dist(unifracs[, , "d_1"])
 ANoWolb_unifrac_dist_d_05 <- as.dist(unifracs[, , "d_0.5"])
 ANoWolb_unifrac_betadisperUW <- betadisper(ANoWolb_unifrac_distUW, metadata_ANoWolb$S_W_N) 
-anova(ANoWolb_unifrac_betadisperUW)
+anova(ANoWolb_unifrac_betadisperUW) # p = 0.4535
 ANoWolb_unifrac_betadisper_d_1 <- betadisper(ANoWolb_unifrac_dist_d_1, metadata_ANoWolb$S_W_N) 
-anova(ANoWolb_unifrac_betadisper_d_1)
+anova(ANoWolb_unifrac_betadisper_d_1) # p = 0.02232
 ANoWolb_unifrac_betadisper_d_05 <- betadisper(ANoWolb_unifrac_dist_d_05, metadata_ANoWolb$S_W_N) 
-anova(ANoWolb_unifrac_betadisper_d_05)
+anova(ANoWolb_unifrac_betadisper_d_05) # p = 0.02352
 
 #No Wolb Eupeodes
 unifracs = GUniFrac::GUniFrac(t(as(otu_table(Eupeodes_Nowolb), "matrix")), phy_tree(Eupeodes_Nowolb), alpha = c(0, 0.5, 1))$unifracs
@@ -622,11 +624,11 @@ EaNoWolb_unifrac_distUW <- as.dist(unifracs[, , "d_UW"])
 EaNoWolb_unifrac_dist_d_1 <- as.dist(unifracs[, , "d_1"])
 EaNoWolb_unifrac_dist_d_05 <- as.dist(unifracs[, , "d_0.5"])
 EaNoWolb_unifrac_betadisperUW <- betadisper(EaNoWolb_unifrac_distUW, metadata_EaNoWolb$S_W_N) 
-anova(EaNoWolb_unifrac_betadisperUW)
+anova(EaNoWolb_unifrac_betadisperUW) # p = 0.9715
 EaNoWolb_unifrac_betadisper_d_1 <- betadisper(EaNoWolb_unifrac_dist_d_1, metadata_EaNoWolb$S_W_N) 
-anova(EaNoWolb_unifrac_betadisper_d_1)
+anova(EaNoWolb_unifrac_betadisper_d_1) # p = 0.5196
 EaNoWolb_unifrac_betadisper_d_05 <- betadisper(EaNoWolb_unifrac_dist_d_05, metadata_EaNoWolb$S_W_N) 
-anova(EaNoWolb_unifrac_betadisper_d_05)
+anova(EaNoWolb_unifrac_betadisper_d_05) # p = 0.9589
 ```
 
 All results above show that unweighted Unifrac distances meet the assumption of homogeneity of variance, for all species and for cases were _Wolbachia_ is either present or absent. In this case, however, I am more interested in results using weighted distances than unweighted, since I don't expect microbial communities _within_ a species to have drastically different taxonomic composition, but I would predict that relative abundance of specific bacterial taxa may change according to location. 
@@ -639,17 +641,17 @@ We will start testing Allograpta first
 # Allograpta With Wolbachia
 A_S_W_N <- metadata_AWolb$S_W_N
 A_Year_all <- metadata_AWolb$Year
-A_Season_all <- metadata_AWolb$Season
-adonis2(formula = AWolb_unifrac_distUW ~ A_S_W_N + A_Season_all, data = metadata_AWolb, strata = A_Year_all, permutations = 999)
+#A_Season_all <- metadata_AWolb$Season
+adonis2(formula = AWolb_unifrac_distUW ~ A_S_W_N, data = metadata_AWolb, strata = A_Year_all, permutations = 999) # p = 0.611
 
 # Allograpta Without Wolbachia
 ANW_S_W_N <- metadata_ANoWolb$S_W_N
 ANW_Year_all <- metadata_ANoWolb$Year
-ANW_Season_all <- metadata_ANoWolb$Season
-adonis2(formula = ANoWolb_unifrac_distUW ~ ANW_S_W_N + ANW_Season_all, data = metadata_ANoWolb, strata = ANW_Year_all, permutations = 999)
+#ANW_Season_all <- metadata_ANoWolb$Season
+adonis2(formula = ANoWolb_unifrac_distUW ~ ANW_S_W_N, data = metadata_ANoWolb, strata = ANW_Year_all, permutations = 999) # p = 0.53
 ```
 
-The results above indicate that, contrary to our hypothesis, differences in the Allograpta's microbiome are not explained by geography (i.e. South versus North populations). In fact, the residuals of these tests seem to indicate that about 95% of variation in microbiome composition is not explained by geography, for either dataset (AWolb and ANoWolb). For Allograpta with Wolbachia removed, both alpha=1 and alpha=0.5 meet the assumption of homogeneity. Let's test weighted Unifrac distances and use F2-statistic where applicable.
+The results above indicate that, contrary to our hypothesis, differences in the Allograpta's microbiome are not explained by geography (i.e. South versus North populations). In fact, the residuals of these tests seem to indicate that over 95% of variation in microbiome composition is not explained by geography, for either dataset (AWolb and ANoWolb). For Allograpta with Wolbachia removed, both alpha=1 and alpha=0.5 fail to meet the assumption of homogeneity. Let's test weighted Unifrac distances and use F2-statistic where applicable.
 
 ```{r unifrac_alphavariable}
 #Allograpta With wolbachia (alpha 1)
@@ -660,10 +662,10 @@ permanovaModF(as.matrix(AWolb_unifrac_dist_d_1), metadata_AWolb, groups = c("S_W
 permanovaModF(as.matrix(AWolb_unifrac_dist_d_05), metadata_AWolb, groups = c("S_W_N", "Season"))
 # Allograpta Without Wolbachia (alpha 1)
 # Regular F-statistic (adonis2)
-adonis2(formula = ANoWolb_unifrac_dist_d_1 ~ ANW_S_W_N + ANW_Season_all, data = metadata_ANoWolb, strata = ANW_Year_all, permutations = 999)
+adonis2(formula = ANoWolb_unifrac_dist_d_1 ~ ANW_S_W_N , data = metadata_ANoWolb, strata = ANW_Year_all, permutations = 999)
 # Allograpta Withouth Wolbachia (alpha 0.5)
 # Regular F-statistic (adonis2)
-adonis2(formula = ANoWolb_unifrac_dist_d_05 ~ ANW_S_W_N + ANW_Season_all, data = metadata_ANoWolb, strata = ANW_Year_all, permutations = 999)
+adonis2(formula = ANoWolb_unifrac_dist_d_05 ~ ANW_S_W_N, data = metadata_ANoWolb, strata = ANW_Year_all, permutations = 999)
 ```
 
 
